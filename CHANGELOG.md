@@ -3,6 +3,16 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.4.1 - 2026-10-11
+
+### Fixed
+- **1.4.0 crashed about a second after start whenever SteamVR was running.** To read the headset refresh rate it
+  probed a range of IVRSystem FnTable slots; a wrong slot faults inside `vrclient_x64.dll` with an access violation,
+  which .NET cannot catch by default, so the whole launcher died. The probing is gone: the refresh rate now comes from
+  the compositor's own frame timestamps (frames / seconds over the last 60 frames), only the compositor slots known for
+  the exact interface version are called (028 = 9/12 verified, 022-026 = 8/11), and every native call is guarded so a
+  fault switches the frame stats off for that run instead of taking the launcher down.
+
 ## 1.4.0 - 2026-10-10
 
 ### Added

@@ -1,6 +1,8 @@
 using System;
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
+using System.Security;
 using System.Threading;
 
 namespace VRModLoader
@@ -24,10 +26,16 @@ namespace VRModLoader
 
     /// <summary>
     /// Reads SteamVR's compositor frame timing as a background OpenVR observer (VRApplication_Background, the same mode
-    /// fpsVR uses - it does not become the scene app and does not affect the running game). Everything is fail-safe:
-    /// any error leaves the feature inactive and the dashboard falls back to the captured status picture.
-    /// Interface versions and FnTable indices were verified against SteamVR 2.17 (IVRCompositor_028: GetFrameTiming=9,
-    /// GetCumulativeStats=12); the classic layout (8/11) is kept as a fallback for older runtimes.
+    /// fpsVR uses - it does not become the scene app and does not affect the running game).
+    ///
+    /// Safety rules, learned the hard way (1.4.0 crashed on start while SteamVR ran because it probed unknown FnTable
+    /// slots - a wrong slot faults INSIDE vrclient_x64.dll, which .NET cannot normally catch):
+    ///  - only call FnTable slots whose layout is known for that exact interface version;
+    ///  - every method that calls native code is marked HandleProcessCorruptedStateExceptions so an access violation is
+    ///    caught, and after any fault the reader switches itself off for the rest of the run instead of retrying.
+    /// Verified on SteamVR 2.17: IVRCompositor_028 GetFrameTiming = slot 9, GetCumulativeStats = slot 12.
+    /// Classic layout (IVRCompositor_022..026 per the OpenVR headers): 8 / 11.
+    /// The refresh rate is derived from the compositor's own frame timestamps, so no other interface is touched.
     /// </summary>
     internal sealed class OpenVrStats
     {
@@ -35,7 +43,6 @@ namespace VRModLoader
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern IntPtr LoadLibrary(string path);
         [DllImport("openvr_api.dll", CharSet = CharSet.Ansi)] private static extern uint VR_InitInternal2(ref int err, int appType, string startupInfo);
         [DllImport("openvr_api.dll")] private static extern void VR_ShutdownInternal();
-        [DllImport("openvr_api.dll")] private static extern bool VR_IsHmdPresent();
         [DllImport("openvr_api.dll", CharSet = CharSet.Ansi)] private static extern IntPtr VR_GetGenericInterface(string version, ref int err);
 
         private const int AppBackground = 2;
@@ -69,9 +76,14 @@ namespace VRModLoader
         }
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate bool GetFrameTimingFn(ref FrameTiming t, uint framesAgo);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate bool GetCumulativeFn(ref Cumulative s, uint size);
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate float GetFloatPropFn(uint device, int prop, ref int err);
 
-        private const int Prop_DisplayFrequency_Float = 300;
+        /// <summary>Known compositor FnTable layouts: interface version → (GetFrameTiming slot, GetCumulativeStats slot).</summary>
+        private static readonly string[] Versions = { "IVRCompositor_028", "IVRCompositor_026", "IVRCompositor_025", "IVRCompositor_024", "IVRCompositor_022" };
+        private static int[] SlotsFor(string version)
+        {
+            if (version == "IVRCompositor_028") return new[] { 9, 12 };   // verified on SteamVR 2.17
+            return new[] { 8, 11 };                                        // classic layout
+        }
 
         // ---- state -------------------------------------------------------------------------------
         private readonly Logger _log;
@@ -80,10 +92,10 @@ namespace VRModLoader
 
         private Thread _thread;
         private volatile bool _stop;
+        private volatile bool _disabled;   // set after any native fault - never touch OpenVR again this run
         private bool _loaded, _inited;
         private GetFrameTimingFn _getFrameTiming;
         private GetCumulativeFn _getCumulative;
-        private GetFloatPropFn _getFloatProp;
 
         // session baseline / accumulators
         private long _basePresents, _baseDropped, _baseReproj;
@@ -92,6 +104,8 @@ namespace VRModLoader
         private int _gpuSamples;
         private long _lastDropped;
         private DateTime _lastDeltaAt;
+        private float _refreshHz;
+        private DateTime _lastHzAt = DateTime.MinValue;
         private volatile bool _resetRequested;
 
         public OpenVrStats(Logger log) { _log = log; }
@@ -118,11 +132,12 @@ namespace VRModLoader
             _thread = null;
         }
 
+        [HandleProcessCorruptedStateExceptions, SecurityCritical]
         private void Loop()
         {
             try
             {
-                while (!_stop)
+                while (!_stop && !_disabled)
                 {
                     try
                     {
@@ -140,16 +155,34 @@ namespace VRModLoader
                         Poll();
                         Sleep(500);
                     }
+                    catch (AccessViolationException ex) { Disable("native fault in SteamVR's client library (" + ex.Message + ")"); }
+                    catch (SEHException ex) { Disable("native fault in SteamVR's client library (" + ex.Message + ")"); }
                     catch (Exception ex)
                     {
                         _log.Debug("VRSTATS", "poll error: " + ex.Message);
-                        Shutdown("error");
+                        if (_inited) Shutdown("error");
                         SetInactive();
                         Sleep(3000);
                     }
                 }
             }
-            finally { if (_inited) Shutdown("exit"); }
+            catch (Exception ex) { _log.Debug("VRSTATS", "stats thread ended: " + ex.Message); }
+            finally
+            {
+                if (_inited && !_disabled) Shutdown("exit");
+                SetInactive();
+            }
+        }
+
+        /// <summary>After a native fault: stop using OpenVR for the rest of this run. The status picture still works.</summary>
+        private void Disable(string why)
+        {
+            _disabled = true;
+            _inited = false;
+            _getFrameTiming = null;
+            _getCumulative = null;
+            SetInactive();
+            _log.Error("VRSTATS", "SteamVR frame stats switched off for this run: " + why + ". The launcher keeps running; please report this with the log.");
         }
 
         private void Sleep(int ms) { for (int i = 0; i < ms && !_stop; i += 50) Thread.Sleep(50); }
@@ -159,6 +192,7 @@ namespace VRModLoader
             lock (_lock) { if (_stats.Active) _stats = new VrStats(); }
         }
 
+        [HandleProcessCorruptedStateExceptions, SecurityCritical]
         private bool TryInit()
         {
             if (!_loaded)
@@ -169,108 +203,70 @@ namespace VRModLoader
                     string dll = System.IO.Path.Combine(bin, "openvr_api.dll");
                     if (System.IO.File.Exists(dll) && LoadLibrary(dll) != IntPtr.Zero) _loaded = true;
                 }
-                if (!_loaded) { _log.Debug("VRSTATS", "openvr_api.dll not found in the SteamVR install - native frame stats off"); return false; }
+                if (!_loaded) { _log.Debug("VRSTATS", "openvr_api.dll not found in the SteamVR install - native frame stats off"); _disabled = true; return false; }
             }
 
             int err = 0;
             try { VR_InitInternal2(ref err, AppBackground, ""); }
             catch (Exception ex) { _log.Debug("VRSTATS", "VR_InitInternal2 threw: " + ex.Message); return false; }
-            if (err != 0) { return false; }   // SteamVR not ready yet - try again later
+            if (err != 0) return false;   // SteamVR not ready yet - try again later
 
-            IntPtr comp = GetInterface(new[] { "IVRCompositor_028", "IVRCompositor_027", "IVRCompositor_026", "IVRCompositor_025", "IVRCompositor_024", "IVRCompositor_022" });
-            if (comp == IntPtr.Zero) { _log.Warn("VRSTATS", "No IVRCompositor interface - native frame stats unavailable"); VR_ShutdownInternal(); return false; }
-            if (!ResolveCompositor(comp)) { _log.Warn("VRSTATS", "Could not resolve the compositor frame-timing functions"); VR_ShutdownInternal(); return false; }
-
-            IntPtr sys = GetInterface(new[] { "IVRSystem_022", "IVRSystem_021", "IVRSystem_020", "IVRSystem_023" });
-            if (sys != IntPtr.Zero) ResolveSystem(sys);   // optional (refresh rate)
+            string version = null;
+            IntPtr comp = IntPtr.Zero;
+            foreach (var v in Versions)
+            {
+                int e = 0;
+                IntPtr p = VR_GetGenericInterface("FnTable:" + v, ref e);
+                if (p != IntPtr.Zero) { comp = p; version = v; break; }
+            }
+            if (comp == IntPtr.Zero)
+            {
+                _log.Warn("VRSTATS", "This SteamVR version exposes no compositor interface the launcher knows - native frame stats off");
+                SafeShutdownNative();
+                _disabled = true;
+                return false;
+            }
+            if (!ResolveCompositor(comp, version))
+            {
+                _log.Warn("VRSTATS", "Compositor " + version + " did not validate - native frame stats off");
+                SafeShutdownNative();
+                _disabled = true;
+                return false;
+            }
 
             _inited = true;
             _haveBase = false;
             _gpuSum = 0; _gpuMax = 0; _gpuSamples = 0;
-            _log.Ok("VRSTATS", "Connected to SteamVR as a background observer - reading compositor frame timing");
+            _refreshHz = 0; _lastHzAt = DateTime.MinValue;
+            _log.Ok("VRSTATS", "Connected to SteamVR as a background observer (" + version + ") - reading compositor frame timing");
             return true;
         }
 
-        private static IntPtr GetInterface(string[] versions)
+        /// <summary>Bind GetFrameTiming / GetCumulativeStats at the slots known for this interface version and validate them.</summary>
+        [HandleProcessCorruptedStateExceptions, SecurityCritical]
+        private bool ResolveCompositor(IntPtr fnTable, string version)
         {
-            foreach (var v in versions)
-            {
-                int e = 0;
-                IntPtr p = VR_GetGenericInterface("FnTable:" + v, ref e);
-                if (p != IntPtr.Zero) return p;
-            }
-            return IntPtr.Zero;
-        }
-
-        /// <summary>Pick the FnTable slots for GetFrameTiming/GetCumulativeStats by trying the known layouts and validating.</summary>
-        private bool ResolveCompositor(IntPtr fnTable)
-        {
+            int[] slots = SlotsFor(version);
             int ps = IntPtr.Size;
-            // candidate (frameTiming, cumulative) index pairs: 028+ = (9,12), classic = (8,11)
-            int[][] pairs = { new[] { 9, 12 }, new[] { 8, 11 } };
-            foreach (var pair in pairs)
-            {
-                try
-                {
-                    IntPtr ftp = Marshal.ReadIntPtr(fnTable, pair[0] * ps);
-                    IntPtr csp = Marshal.ReadIntPtr(fnTable, pair[1] * ps);
-                    if (ftp == IntPtr.Zero || csp == IntPtr.Zero) continue;
-                    var ft = (GetFrameTimingFn)Marshal.GetDelegateForFunctionPointer(ftp, typeof(GetFrameTimingFn));
-                    var cs = (GetCumulativeFn)Marshal.GetDelegateForFunctionPointer(csp, typeof(GetCumulativeFn));
-                    var t = new FrameTiming { size = (uint)Marshal.SizeOf(typeof(FrameTiming)) };
-                    bool ftOk = ft(ref t, 0);
-                    var c = new Cumulative();
-                    bool csOk = cs(ref c, (uint)Marshal.SizeOf(typeof(Cumulative)));
-                    // valid layout: cumulative reports a real game pid and a large present count
-                    if (ftOk && csOk && c.pid != 0 && c.presents > 100)
-                    {
-                        _getFrameTiming = ft;
-                        _getCumulative = cs;
-                        _log.Debug("VRSTATS", "compositor FnTable indices " + pair[0] + "/" + pair[1] + " validated (pid " + c.pid + ", " + c.presents + " presents)");
-                        return true;
-                    }
-                }
-                catch { }
-            }
-            // last resort: accept (9,12) without the pid check (game may not be presenting yet)
+            IntPtr ftp = Marshal.ReadIntPtr(fnTable, slots[0] * ps);
+            IntPtr csp = Marshal.ReadIntPtr(fnTable, slots[1] * ps);
+            if (ftp == IntPtr.Zero || csp == IntPtr.Zero) return false;
+            var ft = (GetFrameTimingFn)Marshal.GetDelegateForFunctionPointer(ftp, typeof(GetFrameTimingFn));
+            var cs = (GetCumulativeFn)Marshal.GetDelegateForFunctionPointer(csp, typeof(GetCumulativeFn));
             try
             {
-                IntPtr ftp = Marshal.ReadIntPtr(fnTable, 9 * ps);
-                IntPtr csp = Marshal.ReadIntPtr(fnTable, 12 * ps);
-                if (ftp != IntPtr.Zero && csp != IntPtr.Zero)
-                {
-                    _getFrameTiming = (GetFrameTimingFn)Marshal.GetDelegateForFunctionPointer(ftp, typeof(GetFrameTimingFn));
-                    _getCumulative = (GetCumulativeFn)Marshal.GetDelegateForFunctionPointer(csp, typeof(GetCumulativeFn));
-                    return true;
-                }
+                var t = new FrameTiming { size = (uint)Marshal.SizeOf(typeof(FrameTiming)) };
+                bool ftOk = ft(ref t, 0);
+                var c = new Cumulative();
+                bool csOk = cs(ref c, (uint)Marshal.SizeOf(typeof(Cumulative)));
+                if (!ftOk || !csOk) return false;
+                _getFrameTiming = ft;
+                _getCumulative = cs;
+                _log.Debug("VRSTATS", version + " slots " + slots[0] + "/" + slots[1] + " validated (scene pid " + c.pid + ", " + c.presents + " presents)");
+                return true;
             }
-            catch { }
-            return false;
-        }
-
-        private void ResolveSystem(IntPtr fnTable)
-        {
-            // GetFloatTrackedDeviceProperty sits deep in the IVRSystem FnTable; probe a window of indices and accept the
-            // one that returns a plausible HMD display frequency (50-200 Hz). Safe: wrong slots return err != 0 or garbage out of range.
-            int ps = IntPtr.Size;
-            for (int idx = 16; idx <= 34; idx++)
-            {
-                try
-                {
-                    IntPtr fp = Marshal.ReadIntPtr(fnTable, idx * ps);
-                    if (fp == IntPtr.Zero) continue;
-                    var fn = (GetFloatPropFn)Marshal.GetDelegateForFunctionPointer(fp, typeof(GetFloatPropFn));
-                    int e = 0;
-                    float hz = fn(0, Prop_DisplayFrequency_Float, ref e);
-                    if (e == 0 && hz >= 50f && hz <= 200f)
-                    {
-                        _getFloatProp = fn;
-                        _log.Debug("VRSTATS", "IVRSystem GetFloatTrackedDeviceProperty at index " + idx + " (display " + hz.ToString("0") + " Hz)");
-                        return;
-                    }
-                }
-                catch { }
-            }
+            catch (AccessViolationException) { return false; }
+            catch (SEHException) { return false; }
         }
 
         private void Poll()
@@ -306,10 +302,16 @@ namespace VRModLoader
                 _lastDeltaAt = now;
             }
 
-            float hz = 0;
-            if (_getFloatProp != null)
+            // refresh rate from the compositor's own timestamps: frames elapsed / seconds elapsed over the last 60 frames
+            if ((now - _lastHzAt).TotalSeconds >= 5)
             {
-                try { int e = 0; float v = _getFloatProp(0, Prop_DisplayFrequency_Float, ref e); if (e == 0 && v >= 50 && v <= 200) hz = v; } catch { }
+                _lastHzAt = now;
+                var old = new FrameTiming { size = (uint)Marshal.SizeOf(typeof(FrameTiming)) };
+                if (_getFrameTiming(ref old, 60) && t.frameIndex > old.frameIndex && t.systemTime > old.systemTime)
+                {
+                    double hz = (t.frameIndex - old.frameIndex) / (t.systemTime - old.systemTime);
+                    if (hz >= 50 && hz <= 250) _refreshHz = (float)(Math.Abs(hz - Math.Round(hz)) < 0.6 ? Math.Round(hz) : Math.Round(hz, 1));
+                }
             }
 
             var s = new VrStats
@@ -323,7 +325,7 @@ namespace VRModLoader
                 Reprojected = reproj,
                 ReprojPct = presents > 0 ? (float)reproj / presents * 100f : 0,
                 DroppedPerMin = droppedPerMin < 0 ? 0 : droppedPerMin,
-                RefreshHz = hz,
+                RefreshHz = _refreshHz,
                 Samples = _gpuSamples
             };
             lock (_lock) _stats = s;
@@ -331,16 +333,22 @@ namespace VRModLoader
             if (_gpuSamples % 120 == 0 && _gpuSamples > 0)
                 _log.Debug("VRSTATS", "GPU " + gpu.ToString("0.0", CultureInfo.InvariantCulture) + " ms (avg " + s.GpuAvgMs.ToString("0.0", CultureInfo.InvariantCulture)
                     + ", max " + s.GpuMaxMs.ToString("0.0", CultureInfo.InvariantCulture) + "), " + dropped + " dropped, " + reproj + " reprojected ("
-                    + s.ReprojPct.ToString("0.0", CultureInfo.InvariantCulture) + "%) of " + presents + " presents");
+                    + s.ReprojPct.ToString("0.0", CultureInfo.InvariantCulture) + "%) of " + presents + " presents"
+                    + (_refreshHz > 0 ? ", " + _refreshHz.ToString("0.#", CultureInfo.InvariantCulture) + " Hz" : ""));
+        }
+
+        [HandleProcessCorruptedStateExceptions, SecurityCritical]
+        private void SafeShutdownNative()
+        {
+            try { VR_ShutdownInternal(); } catch { }
         }
 
         private void Shutdown(string why)
         {
-            try { VR_ShutdownInternal(); } catch { }
+            SafeShutdownNative();
             _inited = false;
             _getFrameTiming = null;
             _getCumulative = null;
-            _getFloatProp = null;
             _log.Debug("VRSTATS", "disconnected from SteamVR (" + why + ")");
         }
 
