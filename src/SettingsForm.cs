@@ -44,7 +44,7 @@ namespace VRModLoader
             grid.AutoSize = true;
             grid.AutoSizeMode = AutoSizeMode.GrowAndShrink;
             grid.Padding = Theme.Pad(14, 12, 14, 4);
-            grid.Width = Theme.S(780);
+            grid.Dock = DockStyle.Top;   // fill the host width - never scroll horizontally, so the label column is always visible
             grid.BackColor = Theme.Bg;
 
             Section(grid, "Paths");
@@ -185,9 +185,11 @@ namespace VRModLoader
 
             Controls.Add(host);
             Controls.Add(buttons);
-            int wantH = grid.PreferredSize.Height + buttons.Height + Theme.S(10);
+            int innerW = Theme.S(810) - Theme.S(24);   // dialog width minus the vertical scrollbar
+            int wantH = grid.GetPreferredSize(new Size(innerW, 0)).Height + buttons.Height + Theme.S(10);
             int maxH = Screen.PrimaryScreen.WorkingArea.Height - Theme.S(80);
             ClientSize = new Size(Theme.S(810), Math.Min(maxH, wantH));
+            Shown += delegate { try { host.AutoScrollPosition = Point.Empty; } catch { } };
             Load += delegate { Theme.DarkTitleBar(this); };
         }
 
@@ -220,6 +222,7 @@ namespace VRModLoader
         private static void Hint(TableLayoutPanel g, string text)
         {
             var l = Theme.Label(text, Theme.Dim, Theme.Small);
+            l.MaximumSize = new Size(Theme.S(600), 0);   // wrap long hints instead of forcing the grid wider
             l.Margin = Theme.Pad(0, 0, 0, 4);
             g.Controls.Add(l, 1, g.RowCount);
             g.SetColumnSpan(l, 2);

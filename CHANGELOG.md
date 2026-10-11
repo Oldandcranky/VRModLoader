@@ -3,6 +3,13 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.3.3 - 2026-10-10
+
+### Fixed
+- Settings window opened scrolled sideways with the whole left label column hidden (a long hint forced the grid wider
+  than the dialog, and focusing the first field scrolled it right). The grid is now docked to the panel width so it
+  never scrolls horizontally, long hints wrap, and the scroll resets to the top-left on open.
+
 ## 1.3.2 - 2026-10-10
 
 ### Fixed
