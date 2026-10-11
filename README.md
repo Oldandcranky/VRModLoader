@@ -4,6 +4,8 @@ One-click launcher and session dashboard for **Titanfall 2 VR** (CircuitLord's m
 the right order, waits for each piece to actually be ready instead of sleeping, launches the mod directly, watches
 the game and the headset link, and tears everything down when you're done.
 
+![VR Mod Loader dashboard during a Titanfall 2 VR session: launch sequence on the left, live game view in the middle, SteamVR status and Air Link quality on the right](docs/dashboard.png)
+
 ```
 pre-flight → back up saves → kill Discord → Meta Horizon → SteamVR → EA app
           → (CircuitLord window, optional) → headset probe → direct launch → in game (dashboard + live view)
