@@ -28,8 +28,21 @@ $assetName = "VRModLoader-$version.exe"
 $sha = (git rev-parse --short HEAD).Trim()
 if (-not (git tag -l $tag)) { git tag -a $tag -m "VR Mod Loader $version" | Out-Null; Write-Host ">> tagged $tag at $sha" }
 elseif ((git rev-list -n 1 $tag).Substring(0, 7) -ne $sha) { throw "$tag already exists on another commit - move it deliberately (git tag -f) or bump VERSION." }
-git push origin HEAD 2>&1 | ForEach-Object { "  $_" }
-git push origin $tag 2>&1 | ForEach-Object { "  $_" }
+
+# git reports push progress on stderr; under PowerShell 5.1 + ErrorActionPreference=Stop that would abort us.
+function Push-Ref([string]$ref) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & git push origin $ref 2>&1
+        $code = $LASTEXITCODE
+        $out | ForEach-Object { Write-Host "  $_" }
+        if ($code -ne 0) { throw "git push origin $ref failed with exit code $code" }
+    }
+    finally { $ErrorActionPreference = $prev }
+}
+Push-Ref 'HEAD'
+Push-Ref $tag
 
 # token from Git Credential Manager, kept in memory only
 $fill = @(@('protocol=https', 'host=github.com', '') | & "$env:ProgramFiles\Git\mingw64\bin\git-credential-manager.exe" get 2>$null)
