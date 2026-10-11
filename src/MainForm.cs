@@ -80,6 +80,17 @@ namespace VRModLoader
         private Bitmap _vrmonBmp;
         private bool _vrmonLogged;
         private LinkQualityPanel _linkPanel;
+        private FrameStatsPanel _frameStats;
+        private OpenVrStats _vrStats;
+        private Button _tabStats;
+        private Panel _paneStats;
+        private StatsPanel _statsPanel;
+        private readonly Timer _glow = new Timer();
+        private double _glowPhase;
+        private bool _launchGlow;
+        private Updater _updater;
+        private string _updateVersion, _updateUrl;
+        private Button _updateBtn;
         private TimeSpan _played;
         private bool _guardActive;
         private bool _guardForcedFs;
@@ -135,6 +146,9 @@ namespace VRModLoader
                 if (_alertText != null && (DateTime.Now - _alertAt).TotalSeconds > 120) ClearAlert();   // safety net: alerts never stick forever
             };
             _clock.Start();
+            _glow.Interval = 45;
+            _glow.Tick += delegate { GlowTick(); };
+            _glow.Start();
             Move += delegate { PositionLiveView(); };
 
             Load += OnLoad;
@@ -210,6 +224,23 @@ namespace VRModLoader
             };
             _engine.Ask = AskFromWorker;
 
+            _vrStats = new OpenVrStats(_log);
+            _engine.VrStatsProvider = delegate { return _vrStats.Read(); };
+            _engine.VrStatsReset = delegate { _vrStats.ResetSession(); };
+            _vrStats.Start();
+
+            _updater = new Updater(_log);
+            System.Threading.Tasks.Task.Factory.StartNew(delegate
+            {
+                try
+                {
+                    string ver, url, notes;
+                    if (_updater.CheckLatest(Program.Version, out ver, out url, out notes))
+                        Ui(delegate { ShowUpdateAvailable(ver, url, notes); });
+                }
+                catch { }
+            });
+
             BuildStepRows();
             _multiplier.Value = (decimal)_s.TimeoutMultiplier;
             _showDebug.Checked = _s.ShowDebug;
@@ -229,7 +260,7 @@ namespace VRModLoader
             var pids = ProcessUtil.Pids("Titanfall2VRLauncher");
             if (pids.Length > 0)
             {
-                _statusGame.Text = "Titanfall 2 VR is running outside the launcher (PID " + pids[0] + ")  -  LAUNCH offers Attach & watch";
+                _statusGame.Text = "Titanfall 2 VR is running outside the launcher (PID " + pids[0] + ")  -  press ATTACH to watch it";
                 _statusGame.ForeColor = Theme.Warn;
             }
             else if (_statusGame.ForeColor == Theme.Warn)
@@ -237,6 +268,129 @@ namespace VRModLoader
                 _statusGame.Text = "No game running";
                 _statusGame.ForeColor = Theme.Dim;
             }
+            RefreshLaunchButton(ph);
+        }
+
+        /// <summary>
+        /// The big button: LAUNCH when no game runs, ATTACH when one is already up, a dimmed status text while a sequence
+        /// runs. It glows (GlowTick) whenever it is the thing to press.
+        /// </summary>
+        private void RefreshLaunchButton(EnginePhase p)
+        {
+            if (_launch == null || _s == null) return;
+            bool sequenceRunning = p == EnginePhase.Launching || p == EnginePhase.InGame || p == EnginePhase.Countdown || p == EnginePhase.ShuttingDown;
+            bool pre = p == EnginePhase.Preflight;
+            _launch.Enabled = !sequenceRunning && !pre;
+            string text;
+            if (p == EnginePhase.InGame) text = "IN GAME  -  " + (_s.AutoCloseAfterGame ? "everything closes when the game exits" : "auto-close is off");
+            else if (p == EnginePhase.Launching) text = "LAUNCHING…";
+            else if (p == EnginePhase.ShuttingDown) text = "SHUTTING DOWN…";
+            else if (p == EnginePhase.Countdown) text = "CLOSING SOON…";
+            else if (pre) text = "PRE-FLIGHT…";
+            else if (ProcessUtil.IsRunning("Titanfall2VRLauncher")) text = "↪   ATTACH TO RUNNING GAME";
+            else text = "▶   LAUNCH TITANFALL 2 VR";
+            if (_launch.Text != text) _launch.Text = text;
+
+            bool dim = sequenceRunning || pre;
+            _launchGlow = _launch.Enabled && !dim;
+            if (!_launchGlow)
+            {
+                _launch.BackColor = dim ? Theme.Panel2 : Theme.Accent;
+                _launch.ForeColor = dim ? Theme.Dim : Theme.Bg;
+                _launch.FlatAppearance.BorderColor = dim ? Theme.Border : Theme.Accent;
+            }
+            else _launch.ForeColor = Theme.Bg;
+        }
+
+        /// <summary>Slow "breathing" glow on the big button while it is the action to take.</summary>
+        private void GlowTick()
+        {
+            if (!_launchGlow || _launch == null || !_launch.Visible || _guardActive) return;
+            _glowPhase += 0.075;
+            if (_glowPhase > Math.PI * 2) _glowPhase -= Math.PI * 2;
+            float t = (float)(0.5 + 0.5 * Math.Sin(_glowPhase));
+            _launch.BackColor = Lerp(Theme.Accent, ColorTranslator.FromHtml("#9CF0FF"), t);
+            _launch.FlatAppearance.BorderColor = Lerp(ColorTranslator.FromHtml("#0FB6D6"), Color.White, t * 0.7f);
+        }
+
+        private static Color Lerp(Color a, Color b, float t)
+        {
+            if (t < 0) t = 0; if (t > 1) t = 1;
+            return Color.FromArgb(
+                (int)(a.R + (b.R - a.R) * t),
+                (int)(a.G + (b.G - a.G) * t),
+                (int)(a.B + (b.B - a.B) * t));
+        }
+
+        // =====================================================================================
+        // self-update
+        // =====================================================================================
+
+        private void ShowUpdateAvailable(string version, string url, string notes)
+        {
+            _updateVersion = version;
+            _updateUrl = url;
+            _log.Info("UPDATE", "Version " + version + " is available (you have " + Program.Version + ")");
+            if (_updateBtn == null)
+            {
+                _updateBtn = Theme.Button("⬆  UPDATE TO " + version, false);
+                _updateBtn.AutoSize = true;
+                _updateBtn.Height = S(30);
+                _updateBtn.Padding = Theme.Pad(10, 0, 10, 0);
+                _updateBtn.ForeColor = Theme.Ok;
+                _updateBtn.FlatAppearance.BorderColor = Theme.Ok;
+                _updateBtn.BackColor = Color.Transparent;
+                _updateBtn.TabStop = false;
+                new ToolTip().SetToolTip(_updateBtn, "Download and install version " + version + " from GitHub");
+                _updateBtn.Click += delegate { DoUpdate(notes); };
+                _header.Controls.Add(_updateBtn);
+                _header.Resize += delegate { PlaceUpdateButton(); };
+            }
+            PlaceUpdateButton();
+            if (_tray != null) _tray.ShowBalloonTip(6000, "Update available", "VR Mod Loader " + version + " is ready - click UPDATE in the header.", ToolTipIcon.Info);
+        }
+
+        private void PlaceUpdateButton()
+        {
+            if (_updateBtn == null) return;
+            // just left of the phase pill
+            int right = _header.Width - Math.Max(S(18), _pillInset + S(10)) - S(210);
+            _updateBtn.Location = new Point(Math.Max(S(560), right - _updateBtn.Width), (_header.Height - _updateBtn.Height) / 2);
+        }
+
+        private void DoUpdate(string notes)
+        {
+            if (string.IsNullOrEmpty(_updateUrl)) return;
+            if (_engine != null && _engine.IsBusy)
+            {
+                DarkDialog.Show(this, "Update later", "A session is running. Update once it is over - the launcher has to restart to install.", new[] { "OK" }, 0);
+                return;
+            }
+            string msg = "Install VR Mod Loader " + _updateVersion + " now? (you have " + Program.Version + ")\n\n"
+                + "The launcher downloads it from GitHub, restarts, and keeps your settings, logs, backups and history."
+                + (string.IsNullOrEmpty(notes) ? "" : "\n\n" + (notes.Length > 600 ? notes.Substring(0, 600) + "…" : notes));
+            if (DarkDialog.Show(this, "Update to " + _updateVersion, msg, new[] { "Update now", "Later" }, 0) != 0) return;
+            _updateBtn.Enabled = false;
+            _updateBtn.Text = "DOWNLOADING…";
+            string url = _updateUrl;
+            System.Threading.Tasks.Task.Factory.StartNew(delegate
+            {
+                string err;
+                bool ok = _updater.DownloadAndStage(url, Application.ExecutablePath, out err);
+                Ui(delegate
+                {
+                    if (!ok)
+                    {
+                        _updateBtn.Enabled = true;
+                        _updateBtn.Text = "⬆  UPDATE TO " + _updateVersion;
+                        DarkDialog.Show(this, "Update failed", err ?? "Unknown error", new[] { "OK" }, 0);
+                        return;
+                    }
+                    _log.Ok("UPDATE", "Update staged - restarting into " + _updateVersion);
+                    _exiting = false;
+                    Close();   // the staged updater swaps the exe once we have exited and starts the new version
+                });
+            });
         }
 
         private void UpdateModLabel()
@@ -700,7 +854,8 @@ namespace VRModLoader
             _tabGame = Tab("GAME LOG");
             _tabSessions = Tab("SESSIONS");
             _tabLive = Tab("LIVE VIEW");
-            Button[] tabButtons = { _tabLauncher, _tabGame, _tabSessions, _tabLive };
+            _tabStats = Tab("STATS");
+            Button[] tabButtons = { _tabLauncher, _tabGame, _tabSessions, _tabLive, _tabStats };
             foreach (var tb in tabButtons) tabs.Controls.Add(tb);
             EventHandler layoutTabs = delegate
             {
@@ -714,11 +869,13 @@ namespace VRModLoader
             _paneGame = BuildLogPane(out _gameBox, false);
             _paneSessions = BuildSessionsPane();
             _paneLive = BuildLivePane();
+            _paneStats = BuildStatsPane();
 
             host.Controls.Add(_paneLauncher);
             host.Controls.Add(_paneGame);
             host.Controls.Add(_paneSessions);
             host.Controls.Add(_paneLive);
+            host.Controls.Add(_paneStats);
             host.Controls.Add(tabs);
 
             // coaching banner for whoever is holding the headset - docks above the tabs when visible
@@ -742,8 +899,21 @@ namespace VRModLoader
             _tabGame.Click += delegate { SelectTab(1); };
             _tabSessions.Click += delegate { SelectTab(2); };
             _tabLive.Click += delegate { SelectTab(3); };
+            _tabStats.Click += delegate { SelectTab(4); };
             SelectTab(0);
             return host;
+        }
+
+        private Panel BuildStatsPane()
+        {
+            var pane = new Panel();
+            pane.Dock = DockStyle.Fill;
+            pane.BackColor = Theme.Panel;
+            pane.Padding = new Padding(1);
+            _statsPanel = new StatsPanel();
+            _statsPanel.Dock = DockStyle.Fill;
+            pane.Controls.Add(_statsPanel);
+            return pane;
         }
 
         private Button Tab(string text)
@@ -761,8 +931,8 @@ namespace VRModLoader
 
         private void SelectTab(int i)
         {
-            Button[] tabs = { _tabLauncher, _tabGame, _tabSessions, _tabLive };
-            Panel[] panes = { _paneLauncher, _paneGame, _paneSessions, _paneLive };
+            Button[] tabs = { _tabLauncher, _tabGame, _tabSessions, _tabLive, _tabStats };
+            Panel[] panes = { _paneLauncher, _paneGame, _paneSessions, _paneLive, _paneStats };
             for (int k = 0; k < tabs.Length; k++)
             {
                 bool on = k == i;
@@ -771,7 +941,8 @@ namespace VRModLoader
                 panes[k].Visible = on;
             }
             panes[i].BringToFront();
-            if (i == 2) LoadSessions();
+            if (i == 2 || i == 4) LoadSessions();
+            if (i == 3 && _miniLog != null) { ScrollEnd(_miniLog); _miniLog.Invalidate(); }
             PositionLiveView();
         }
 
@@ -981,9 +1152,10 @@ namespace VRModLoader
             side.Margin = Theme.Pad(2, 0, 0, 0);
             side.BackColor = Theme.Panel;
             side.ColumnCount = 1;
-            side.RowCount = 2;
-            side.RowStyles.Add(new RowStyle(SizeType.Absolute, S(372)));
-            side.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            side.RowCount = 3;
+            side.RowStyles.Add(new RowStyle(SizeType.Percent, 50));          // SteamVR status picture
+            side.RowStyles.Add(new RowStyle(SizeType.Absolute, S(140)));     // frame stats
+            side.RowStyles.Add(new RowStyle(SizeType.Percent, 50));          // link quality
 
             _vrmonPanel = new ImagePanel();
             _vrmonPanel.Dock = DockStyle.Fill;
@@ -999,8 +1171,13 @@ namespace VRModLoader
             _linkPanel.Dock = DockStyle.Fill;
             _linkPanel.Margin = Theme.Pad(0, 2, 0, 0);
 
+            _frameStats = new FrameStatsPanel();
+            _frameStats.Dock = DockStyle.Fill;
+            _frameStats.Margin = Theme.Pad(0, 2, 0, 0);
+
             side.Controls.Add(_vrmonPanel, 0, 0);
-            side.Controls.Add(_linkPanel, 0, 1);
+            side.Controls.Add(_frameStats, 0, 1);
+            side.Controls.Add(_linkPanel, 0, 2);
             middle.Controls.Add(_livePanel, 0, 0);
             middle.Controls.Add(side, 1, 0);
 
@@ -1041,6 +1218,8 @@ namespace VRModLoader
             UpdateVrmonView();
             if (_linkPanel != null && _paneLive != null && _paneLive.Visible)
                 _linkPanel.Update(_engine != null ? _engine.Watcher : null, _engine != null && _engine.InGame);
+            if (_frameStats != null && _paneLive != null && _paneLive.Visible)
+                _frameStats.Update(_vrStats != null ? _vrStats.Read() : null);
         }
 
         /// <summary>
@@ -1310,6 +1489,7 @@ namespace VRModLoader
         {
             if (_sessions == null) return;
             var list = SessionHistory.Load();
+            if (_statsPanel != null) _statsPanel.SetData(list);
             _sessions.BeginUpdate();
             _sessions.Items.Clear();
             double totalPlayed = 0; int crashes = 0;
@@ -1415,16 +1595,7 @@ namespace VRModLoader
             _header.Invalidate();
 
             bool sequenceRunning = p == EnginePhase.Launching || p == EnginePhase.InGame || p == EnginePhase.Countdown || p == EnginePhase.ShuttingDown;
-            _launch.Enabled = !sequenceRunning && p != EnginePhase.Preflight;
-            _launch.Text = p == EnginePhase.InGame ? "IN GAME  -  " + (_s.AutoCloseAfterGame ? "everything closes when the game exits" : "auto-close is off")
-                : p == EnginePhase.Launching ? "LAUNCHING…"
-                : p == EnginePhase.ShuttingDown ? "SHUTTING DOWN…"
-                : p == EnginePhase.Preflight ? "PRE-FLIGHT…"
-                : "▶   LAUNCH TITANFALL 2 VR";
-            bool dimLaunch = sequenceRunning || p == EnginePhase.Preflight;
-            _launch.BackColor = dimLaunch ? Theme.Panel2 : Theme.Accent;
-            _launch.ForeColor = dimLaunch ? Theme.Dim : Theme.Bg;
-            _launch.FlatAppearance.BorderColor = dimLaunch ? Theme.Border : Theme.Accent;
+            RefreshLaunchButton(p);
             _stop.Enabled = sequenceRunning && p != EnginePhase.ShuttingDown;
             _stop.Text = p == EnginePhase.InGame ? "■  DETACH" : "■  STOP";
             _closeAll.Enabled = p != EnginePhase.ShuttingDown;
@@ -1727,6 +1898,8 @@ namespace VRModLoader
             if (_awake) { _awake = false; WindowUtil.KeepSystemAwake(false); }
             if (_live != null) _live.Dispose();
             if (_vrmonBmp != null) { _vrmonBmp.Dispose(); _vrmonBmp = null; }
+            _glow.Stop();
+            if (_vrStats != null) { try { _vrStats.Stop(); } catch { } }
             _flush.Stop();
             _clock.Stop();
             if (_tray != null) { _tray.Visible = false; _tray.Dispose(); }

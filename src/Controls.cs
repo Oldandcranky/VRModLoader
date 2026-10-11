@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace VRModLoader
@@ -403,6 +404,184 @@ namespace VRModLoader
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using (var pen = new Pen(RttColor(wtc.LinkRttAvgMs), 1.6f)) g.DrawLines(pen, pts);
             using (var dot = new SolidBrush(RttColor(wtc.LinkRttMs))) { var p = pts[n - 1]; g.FillEllipse(dot, p.X - 3, p.Y - 3, 6, 6); }
+        }
+    }
+
+    /// <summary>SteamVR compositor frame stats: GPU ms vs the refresh budget, dropped and reprojected frames.</summary>
+    internal sealed class FrameStatsPanel : Panel
+    {
+        private VrStats _s;
+
+        public FrameStatsPanel()
+        {
+            DoubleBuffered = true;
+            BackColor = Theme.Panel;
+            Padding = Theme.Pad(12, 8, 12, 8);
+        }
+
+        public void Update(VrStats s) { _s = s; Invalidate(); }
+
+        private static Color GpuColor(float ms, float budget)
+        {
+            if (budget < 1) return Theme.Text;
+            float frac = ms / budget;
+            if (frac < 0.6f) return Theme.Ok;
+            if (frac < 0.85f) return Theme.Warn;
+            return Theme.Error;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            var g = e.Graphics;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            int x = Padding.Left, y = Padding.Top, w = Width - Padding.Horizontal;
+            TextRenderer.DrawText(g, "STEAMVR FRAME STATS", Theme.Heading, new Point(x, y), Theme.Accent);
+            y += Theme.S(24);
+
+            var s = _s;
+            if (s == null || !s.Active)
+            {
+                TextRenderer.DrawText(g, "Connects to SteamVR while a session runs: GPU time, dropped and reprojected frames.",
+                    Theme.Small, new Rectangle(x, y, w, Theme.S(40)), Theme.Dim, TextFormatFlags.WordBreak);
+                return;
+            }
+
+            float budget = s.BudgetMs;
+            string big = s.GpuMs.ToString("0.0", CultureInfo.InvariantCulture) + " ms";
+            var bigSize = TextRenderer.MeasureText(g, big, Theme.Title);
+            TextRenderer.DrawText(g, big, Theme.Title, new Point(x, y), GpuColor(s.GpuMs, budget));
+            string of = budget > 1 ? "GPU  ·  of " + budget.ToString("0.0", CultureInfo.InvariantCulture) + " ms" + (s.RefreshHz > 1 ? " (" + s.RefreshHz.ToString("0") + " Hz)" : "") : "GPU render";
+            TextRenderer.DrawText(g, of, Theme.Small, new Point(x + bigSize.Width + Theme.S(8), y + bigSize.Height - Theme.S(20)), Theme.Dim);
+            y += bigSize.Height + Theme.S(2);
+
+            TextRenderer.DrawText(g, "avg " + s.GpuAvgMs.ToString("0.0", CultureInfo.InvariantCulture) + "   max " + s.GpuMaxMs.ToString("0.0", CultureInfo.InvariantCulture) + " ms",
+                Theme.UI, new Point(x, y), Theme.Text);
+            y += Theme.S(22);
+
+            Color dropC = s.Dropped > 0 ? Theme.Error : Theme.Ok;
+            TextRenderer.DrawText(g, s.Dropped + " dropped", Theme.UIBold, new Point(x, y), dropC);
+            int midX = x + Theme.S(120);
+            Color repC = s.ReprojPct < 2 ? Theme.Ok : s.ReprojPct < 8 ? Theme.Warn : Theme.Error;
+            TextRenderer.DrawText(g, s.Reprojected + " reprojected (" + s.ReprojPct.ToString("0.0", CultureInfo.InvariantCulture) + "%)", Theme.UI, new Point(midX, y), repC);
+            y += Theme.S(20);
+            TextRenderer.DrawText(g, s.Presents.ToString("N0", CultureInfo.InvariantCulture) + " frames presented", Theme.Small, new Point(x, y), Theme.Dim);
+        }
+    }
+
+    /// <summary>Aggregate view over the whole session history: totals, link quality by transport, frame stats, a play-time trend.</summary>
+    internal sealed class StatsPanel : Panel
+    {
+        private System.Collections.Generic.List<SessionRecord> _list = new System.Collections.Generic.List<SessionRecord>();
+
+        public StatsPanel()
+        {
+            DoubleBuffered = true;
+            BackColor = Theme.Panel;
+            Padding = Theme.Pad(18, 14, 18, 14);
+            AutoScroll = true;
+        }
+
+        public void SetData(System.Collections.Generic.List<SessionRecord> list) { _list = list ?? new System.Collections.Generic.List<SessionRecord>(); Invalidate(); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            var g = e.Graphics;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            int x = Padding.Left, y = Padding.Top, w = Width - Padding.Horizontal - Theme.S(18);
+
+            if (_list.Count == 0)
+            {
+                TextRenderer.DrawText(g, "No sessions recorded yet. Play a session and the numbers land here.", Theme.UI, new Point(x, y), Theme.Dim);
+                return;
+            }
+
+            // ---- totals ----
+            int sessions = _list.Count;
+            double totalPlay = 0; int crashes = 0, clean = 0;
+            foreach (var r in _list) { totalPlay += r.DurationSec; if (r.Outcome == "crash") crashes++; else if (r.Outcome == "clean") clean++; }
+            double crashRate = sessions > 0 ? crashes * 100.0 / sessions : 0;
+
+            y = Section(g, "OVERVIEW", x, y);
+            y = Stat(g, x, y, w, "Sessions", sessions.ToString(), "" + clean + " clean · " + crashes + " crashes", crashRate < 10 ? Theme.Ok : crashRate < 30 ? Theme.Warn : Theme.Error);
+            y = Stat(g, x, y, w, "Total play time", ProcessUtil.FormatSpan(TimeSpan.FromSeconds(totalPlay)), "avg " + ProcessUtil.FormatSpan(TimeSpan.FromSeconds(totalPlay / Math.Max(1, sessions))) + "/session", Theme.Text);
+            y = Stat(g, x, y, w, "Crash rate", crashRate.ToString("0", CultureInfo.InvariantCulture) + "%", crashes + " of " + sessions, crashRate < 10 ? Theme.Ok : crashRate < 30 ? Theme.Warn : Theme.Error);
+            y += Theme.S(10);
+
+            // ---- link quality by transport ----
+            y = Section(g, "LINK QUALITY", x, y);
+            y = TransportStat(g, x, y, w, "Air Link");
+            y = TransportStat(g, x, y, w, "USB Link");
+            y += Theme.S(10);
+
+            // ---- frame stats ----
+            var fr = _list.Where(r => r.GpuAvgMs > 0).ToList();
+            y = Section(g, "FRAME STATS (SteamVR)", x, y);
+            if (fr.Count == 0) y = Stat(g, x, y, w, "GPU time", "no data yet", "recorded from v1.4.0 on", Theme.Dim);
+            else
+            {
+                double gpuAvg = fr.Average(r => r.GpuAvgMs);
+                double gpuMax = fr.Max(r => r.GpuMaxMs);
+                long drop = fr.Sum(r => r.DroppedFrames);
+                double repAvg = fr.Average(r => r.ReprojPct);
+                y = Stat(g, x, y, w, "GPU render", gpuAvg.ToString("0.0", CultureInfo.InvariantCulture) + " ms avg", "worst frame " + gpuMax.ToString("0.0", CultureInfo.InvariantCulture) + " ms", gpuAvg < 8 ? Theme.Ok : gpuAvg < 11 ? Theme.Warn : Theme.Error);
+                y = Stat(g, x, y, w, "Dropped frames", drop.ToString("N0", CultureInfo.InvariantCulture), "across " + fr.Count + " sessions", drop == 0 ? Theme.Ok : Theme.Warn);
+                y = Stat(g, x, y, w, "Reprojection", repAvg.ToString("0.0", CultureInfo.InvariantCulture) + "% avg", "", repAvg < 2 ? Theme.Ok : repAvg < 8 ? Theme.Warn : Theme.Error);
+            }
+            y += Theme.S(10);
+
+            // ---- play-time trend (last 20) ----
+            y = Section(g, "RECENT PLAY TIME", x, y);
+            var recent = _list.Skip(Math.Max(0, _list.Count - 20)).ToList();
+            DrawBars(g, x, y, w, Theme.S(70), recent);
+        }
+
+        private int TransportStat(Graphics g, int x, int y, int w, string transport)
+        {
+            var rows = _list.Where(r => r.LinkSamples > 0 && string.Equals(r.LinkTransport, transport, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (rows.Count == 0) return Stat(g, x, y, w, transport, "no sessions", "", Theme.Dim);
+            double avg = rows.Average(r => r.LinkAvgRttMs);
+            double max = rows.Max(r => r.LinkMaxRttMs);
+            int spikes = rows.Sum(r => r.LinkSpikes);
+            Color c = avg < 8 ? Theme.Ok : avg < 20 ? Theme.Warn : Theme.Error;
+            return Stat(g, x, y, w, transport, avg.ToString("0.0", CultureInfo.InvariantCulture) + " ms avg", rows.Count + " sessions · max " + max.ToString("0", CultureInfo.InvariantCulture) + " ms · " + spikes + " spikes", c);
+        }
+
+        private static int Section(Graphics g, string title, int x, int y)
+        {
+            TextRenderer.DrawText(g, title, Theme.Heading, new Point(x, y), Theme.Accent);
+            return y + Theme.S(26);
+        }
+
+        private static int Stat(Graphics g, int x, int y, int w, string label, string value, string sub, Color valueColor)
+        {
+            TextRenderer.DrawText(g, label, Theme.UI, new Point(x, y), Theme.Dim);
+            var vSize = TextRenderer.MeasureText(g, value, Theme.Big);
+            TextRenderer.DrawText(g, value, Theme.Big, new Point(x + Theme.S(200), y - Theme.S(2)), valueColor);
+            if (!string.IsNullOrEmpty(sub))
+                TextRenderer.DrawText(g, sub, Theme.Small, new Point(x + Theme.S(200) + vSize.Width + Theme.S(10), y + Theme.S(2)), Theme.Dim);
+            return y + Theme.S(26);
+        }
+
+        private static void DrawBars(Graphics g, int x, int y, int w, int h, System.Collections.Generic.List<SessionRecord> rows)
+        {
+            if (rows.Count == 0) { TextRenderer.DrawText(g, "no sessions", Theme.Small, new Point(x, y), Theme.Dim); return; }
+            double max = 1;
+            foreach (var r in rows) if (r.DurationSec > max) max = r.DurationSec;
+            int n = rows.Count;
+            float bw = Math.Max(2f, (float)(w - (n - 1) * Theme.S(3)) / n);
+            for (int i = 0; i < n; i++)
+            {
+                var r = rows[i];
+                float bh = (float)(r.DurationSec / max) * h;
+                if (bh < 1) bh = 1;
+                float bx = x + i * (bw + Theme.S(3));
+                Color c = r.Outcome == "crash" ? Theme.Error : r.Outcome == "clean" ? Theme.Ok : Theme.Dim;
+                using (var br = new SolidBrush(c)) g.FillRectangle(br, bx, y + h - bh, bw, bh);
+            }
+            TextRenderer.DrawText(g, "longest " + ProcessUtil.FormatSpan(TimeSpan.FromSeconds(max)) + "  ·  green = clean, red = crash", Theme.Small, new Point(x, y + h + Theme.S(4)), Theme.Dim);
         }
     }
 

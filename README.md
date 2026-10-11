@@ -73,6 +73,9 @@ opening CircuitLord's window.
   thumbnail - zero load, no input), the SteamVR Status window (device icons, frame graph) beside it, a **link quality**
   panel (round trip now / avg / max / jitter, spikes, sparkline, headset battery - from Meta's per-second clock-sync
   samples, Air Link or cable) and a compact log underneath.
+- **SteamVR frame stats**: the launcher reads SteamVR's compositor numbers as a background OpenVR observer (it never
+  becomes the scene app): GPU render time against the refresh budget, dropped frames and reprojected frames, live on
+  the dashboard and saved per session.
 - **Headset link watch**: Meta's service log and SteamVR's monitor log are tailed. USB errors, `termination_reason`,
   SteamVR Standby and low headset battery show up red, pop a tray balloon, and go into the session record.
 - **OLED guard**: after 2 min without mouse/keyboard the screen goes near-black with a dim, drifting timer and a
@@ -80,6 +83,16 @@ opening CircuitLord's window.
 - **Sleep guard**: the PC is held awake while a session runs (never the display).
 - **☠ KILL GAME + CLOSE ALL** does exactly that - it is the emergency stop, not the way to end a session. Quit the
   game from inside VR and the launcher tears everything down by itself after a cancellable countdown.
+
+## Stats and updates
+
+- **STATS tab**: totals over your whole history - sessions, play time, crash rate, link quality split by Air Link vs
+  USB Link, SteamVR frame stats, and a bar chart of recent session lengths.
+- **Self-update**: on start the launcher checks the latest GitHub release. When a newer one exists an
+  **UPDATE TO x.y.z** button appears in the header; one click downloads, verifies and installs it and restarts,
+  keeping your settings, logs, backups and history.
+- **LAUNCH / ATTACH**: the big button reads ATTACH TO RUNNING GAME whenever Titanfall 2 VR is already up, and glows
+  while it is the thing to press.
 
 ## Focus mode
 

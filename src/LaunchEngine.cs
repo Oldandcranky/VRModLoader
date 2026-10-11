@@ -50,6 +50,9 @@ namespace VRModLoader
         public int GamePid { get { return _gamePid; } }
         /// <summary>The log watcher of the current (or most recent) session - link quality, battery, SteamVR state.</summary>
         public GameLogWatcher Watcher { get; private set; }
+        /// <summary>Supplied by the UI: a read of the current SteamVR compositor stats, and a reset at game start.</summary>
+        public Func<VrStats> VrStatsProvider;
+        public Action VrStatsReset;
 
         public event Action<StepInfo> StepChanged;
         public event Action<EnginePhase> PhaseChanged;
@@ -1091,6 +1094,7 @@ namespace VRModLoader
         {
             const string cat = "GAME";
             _log.Separator(cat, "IN GAME - PID " + _gamePid);
+            try { if (VrStatsReset != null) VrStatsReset(); } catch { }
             Raise(GameDetected);
 
             GameLogWatcher watcher = _s.TailGameLogs ? new GameLogWatcher(_s.GamePath, _gameStart.AddSeconds(-10), _log, _s.ShowModuleLoads) : null;
@@ -1210,6 +1214,25 @@ namespace VRModLoader
                     + " ms, " + watcher.LinkSpikes + " spike(s) over " + GameLogWatcher.SpikeMs + " ms in " + watcher.LinkSamples + " samples");
             }
             if (watcher != null && watcher.HeadsetBattery >= 0) record.HeadsetBattery = watcher.HeadsetBattery;
+
+            try
+            {
+                VrStats vs = VrStatsProvider != null ? VrStatsProvider() : null;
+                if (vs != null && vs.Active && vs.Samples > 0)
+                {
+                    record.GpuAvgMs = Math.Round(vs.GpuAvgMs, 2);
+                    record.GpuMaxMs = Math.Round(vs.GpuMaxMs, 2);
+                    record.DroppedFrames = vs.Dropped;
+                    record.ReprojectedFrames = vs.Reprojected;
+                    record.ReprojPct = Math.Round(vs.ReprojPct, 2);
+                    record.RefreshHz = Math.Round(vs.RefreshHz, 0);
+                    _log.Info(cat, "SteamVR frame stats this session: GPU avg " + vs.GpuAvgMs.ToString("0.0", CultureInfo.InvariantCulture)
+                        + " ms (max " + vs.GpuMaxMs.ToString("0.0", CultureInfo.InvariantCulture) + ")"
+                        + (vs.RefreshHz > 1 ? " of " + vs.BudgetMs.ToString("0.0", CultureInfo.InvariantCulture) + " ms budget @ " + vs.RefreshHz.ToString("0") + " Hz" : "")
+                        + ", " + vs.Dropped + " dropped, " + vs.Reprojected + " reprojected (" + vs.ReprojPct.ToString("0.0", CultureInfo.InvariantCulture) + "%) of " + vs.Presents + " frames");
+                }
+            }
+            catch (Exception ex) { _log.Debug(cat, "VR stats readout failed: " + ex.Message); }
 
             string linkNote = null;
             if (watcher != null && watcher.LinkDropReason != null)

@@ -27,6 +27,12 @@ namespace VRModLoader
         public int LinkSamples { get; set; }
         public int LinkSpikes { get; set; }
         public int HeadsetBattery { get; set; }
+        public double GpuAvgMs { get; set; }
+        public double GpuMaxMs { get; set; }
+        public long DroppedFrames { get; set; }
+        public long ReprojectedFrames { get; set; }
+        public double ReprojPct { get; set; }
+        public double RefreshHz { get; set; }
 
         public SessionRecord()
         {

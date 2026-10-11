@@ -3,6 +3,23 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.4.0 - 2026-10-10
+
+### Added
+- **Native SteamVR frame stats.** The launcher connects to SteamVR as a background OpenVR observer (the same mode
+  fpsVR uses; it never becomes the scene app) and reads the compositor's own numbers: GPU render time against the
+  refresh budget, dropped frames and reprojected frames. A new **SteamVR frame stats** panel on the LIVE VIEW tab
+  shows them live (green / amber / red against the frame budget), and every session record keeps the GPU average and
+  worst frame, dropped and reprojected counts and the refresh rate. Verified against SteamVR 2.17
+  (`IVRCompositor_028`); the older interface layout is kept as a fallback.
+- **STATS tab.** Totals over your whole history: sessions, play time, crash rate, link quality split by Air Link vs USB
+  Link, SteamVR frame stats, and a bar chart of recent session lengths (green = clean, red = crash).
+- **Self-update.** On start the launcher checks the latest GitHub release; when a newer one exists an
+  **UPDATE TO x.y.z** button appears in the header. One click downloads it, verifies it, restarts into the new version
+  and keeps your settings, logs, backups and history.
+- **ATTACH button.** The big button reads **ATTACH TO RUNNING GAME** whenever Titanfall 2 VR is already up and
+  **LAUNCH TITANFALL 2 VR** otherwise, and it glows gently while it is the thing to press.
+
 ## 1.3.5 - 2026-10-10
 
 ### Fixed
