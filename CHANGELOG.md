@@ -3,6 +3,13 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.3.5 - 2026-10-10
+
+### Fixed
+- The launcher now goes fullscreen on start even when a game is already running (attach-and-watch). It used to skip
+  focus mode entirely in that case and stay windowed; now it still goes borderless-fullscreen and only skips the
+  "minimize every other window" sweep so the game's own window is left alone.
+
 ## 1.3.4 - 2026-10-10
 
 ### Fixed

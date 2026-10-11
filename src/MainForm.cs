@@ -548,9 +548,14 @@ namespace VRModLoader
 
         private void StartFocusMode()
         {
+            // A game already running (attach-and-watch): still go fullscreen, but DON'T minimize-all (that would
+            // disturb the game's own window). Only the no-game path does the Win+D sweep.
             if (ProcessUtil.Present(GameInfo.GameProcessNames).Length > 0)
             {
-                _log.Warn("FOCUS", "Focus mode skipped - Titanfall 2 VR is already running and its window is left alone");
+                _log.Info("FOCUS", "A game is already running - going fullscreen without minimizing other windows");
+                EnterFullscreen();
+                WindowUtil.ForceForeground(Handle);
+                Activate();
                 return;
             }
             _log.Info("FOCUS", "Focus mode: minimizing every other window (same as Win+D) and going fullscreen");
