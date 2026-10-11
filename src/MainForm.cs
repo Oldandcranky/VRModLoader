@@ -1064,11 +1064,21 @@ namespace VRModLoader
             }
             if (_liveVrmon.SourceMinimized)
             {
-                if (WantPictures) WindowUtil.RestoreBehind(_liveVrmon.Source, Handle);
+                if (WantPictures)
+                {
+                    bool stole = WindowUtil.RestoreBehind(_liveVrmon.Source, Handle);
+                    if (stole) WindowUtil.ForceForeground(Handle);
+                    _log.Debug("LIVEVIEW", "SteamVR Status window was minimized - restored behind the launcher" + (stole ? " (activating restore)" : ""));
+                    PositionLiveView();
+                }
                 _vrmonHint.Text = "Restoring the SteamVR window…";
                 _vrmonHint.Visible = true;
             }
-            else _vrmonHint.Visible = false;
+            else
+            {
+                _vrmonHint.Visible = false;
+                PositionLiveView();
+            }
         }
 
         private void UpdateGameView()
@@ -1121,8 +1131,9 @@ namespace VRModLoader
                 bool wantPicture = Visible && !_inTray && _paneLive.Visible && WindowState != FormWindowState.Minimized;
                 if (wantPicture)
                 {
-                    WindowUtil.RestoreBehind(_live.Source, Handle);
-                    if (!_liveRestoredLogged) { _liveRestoredLogged = true; _log.Info("LIVEVIEW", "The game window was minimized - restored it behind the launcher so the live view keeps running"); }
+                    bool stole = WindowUtil.RestoreBehind(_live.Source, Handle);
+                    if (stole) WindowUtil.ForceForeground(Handle);
+                    if (!_liveRestoredLogged) { _liveRestoredLogged = true; _log.Info("LIVEVIEW", "The game window was minimized - restored it behind the launcher so the live view keeps running" + (stole ? " (activating restore)" : "")); }
                     _liveHint.Text = "Restoring the game window…";
                 }
                 else _liveHint.Text = "The game window is minimized - it is restored automatically when the live view is on screen";

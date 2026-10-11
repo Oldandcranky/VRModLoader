@@ -33,16 +33,51 @@ namespace VRModLoader
         private const int SW_SHOWNOACTIVATE = 4;
         private const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10;
 
-        /// <summary>Un-minimize a window without activating it and slot it directly beneath ours - DWM only renders non-minimized windows.</summary>
-        public static void RestoreBehind(IntPtr hwnd, IntPtr behindOf)
+        [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WINDOWPLACEMENT
         {
+            public int length;
+            public int flags;
+            public int showCmd;
+            public POINT ptMinPosition;
+            public POINT ptMaxPosition;
+            public RECT rcNormalPosition;
+        }
+        [DllImport("user32.dll")] private static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+        [DllImport("user32.dll")] private static extern bool SetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+
+        /// <summary>
+        /// Un-minimize a window and slot it directly beneath ours - DWM only renders non-minimized windows.
+        /// ShowWindow(SW_SHOWNOACTIVATE) does NOT restore an iconic window; SetWindowPlacement does, without activating.
+        /// Returns true if the activating fallback (SW_RESTORE) had to be used, so the caller can take the foreground back.
+        /// </summary>
+        public static bool RestoreBehind(IntPtr hwnd, IntPtr behindOf)
+        {
+            bool activated = false;
             try
             {
-                if (hwnd == IntPtr.Zero) return;
-                if (IsIconic(hwnd)) ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                if (hwnd == IntPtr.Zero) return false;
+                if (IsIconic(hwnd))
+                {
+                    var wp = new WINDOWPLACEMENT();
+                    wp.length = Marshal.SizeOf(typeof(WINDOWPLACEMENT));
+                    if (GetWindowPlacement(hwnd, ref wp))
+                    {
+                        wp.showCmd = SW_SHOWNOACTIVATE;
+                        wp.flags = 0;
+                        SetWindowPlacement(hwnd, ref wp);
+                    }
+                    if (IsIconic(hwnd))
+                    {
+                        ShowWindow(hwnd, SW_RESTORE);
+                        activated = true;
+                    }
+                }
                 SetWindowPos(hwnd, behindOf, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             }
             catch { }
+            return activated;
         }
         [DllImport("user32.dll")] private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
         [DllImport("kernel32.dll")] private static extern uint SetThreadExecutionState(uint esFlags);

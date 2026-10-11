@@ -3,6 +3,13 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.3.1 - 2026-10-10
+
+### Fixed
+- Minimized windows (the game's mirror, the SteamVR Status window) are now really restored behind the launcher so
+  their live pictures render. `ShowWindow(SW_SHOWNOACTIVATE)` does not un-minimize; `SetWindowPlacement` does, with
+  an activating restore as fallback after which the launcher takes the foreground back.
+
 ## 1.3.0 - 2026-10-10
 
 ### Added
