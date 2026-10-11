@@ -3,6 +3,17 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.5.1 - 2026-10-11
+
+### Fixed
+- The OLED guard now hides the mouse pointer as well. The screen went near-black but Windows' white arrow stayed put,
+  the brightest static thing left on the panel. The pointer is swapped for a transparent one while the guard is on
+  (immediately, no mouse movement needed) and comes back with any input.
+
+### Internal
+- `tools\publish.ps1 -Exe build\VRModLoader.exe` publishes a staged build, so a release can go out while the launcher
+  is in use; the exe's version must match `VERSION`.
+
 ## 1.5.0 - 2026-10-11
 
 ### Added

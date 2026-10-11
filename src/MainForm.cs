@@ -1594,6 +1594,9 @@ namespace VRModLoader
             }
             _root.Visible = false;
             BackColor = Color.Black;
+            // the white pointer is the brightest thing left on the panel - hide it; any input ends the guard and brings it back
+            var blank = WindowUtil.BlankCursor();
+            if (blank != null) Cursor = blank;
             Drift();
             _log.Info("OLED", "No input for " + _s.OledGuardSeconds + "s - OLED guard on (full-screen near-black, drifting status)");
         }
@@ -1601,6 +1604,7 @@ namespace VRModLoader
         private void ExitGuard(string why)
         {
             _guardActive = false;
+            Cursor = Cursors.Default;
             BackColor = Theme.Bg;
             _root.Visible = true;
             if (_guardForcedFs)

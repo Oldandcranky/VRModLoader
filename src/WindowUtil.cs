@@ -152,6 +152,27 @@ namespace VRModLoader
             catch { return 0; }
         }
 
+        [DllImport("user32.dll")] private static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] andPlane, byte[] xorPlane);
+        private static System.Windows.Forms.Cursor _blankCursor;
+
+        /// <summary>A fully transparent cursor (AND mask all ones, XOR mask all zeros) - the OLED guard hides the pointer
+        /// with it. Unlike ShowCursor(false) it takes effect at once, without the mouse moving. Created once, kept for the
+        /// app's lifetime; null if Windows refuses.</summary>
+        public static System.Windows.Forms.Cursor BlankCursor()
+        {
+            if (_blankCursor != null) return _blankCursor;
+            try
+            {
+                const int size = 32;
+                var and = new byte[size * size / 8];
+                for (int i = 0; i < and.Length; i++) and[i] = 0xFF;
+                IntPtr h = CreateCursor(Marshal.GetHINSTANCE(typeof(WindowUtil).Module), 0, 0, size, size, and, new byte[size * size / 8]);
+                if (h != IntPtr.Zero) _blankCursor = new System.Windows.Forms.Cursor(h);
+            }
+            catch { }
+            return _blankCursor;
+        }
+
         /// <summary>Sleep guard: stop the PC from sleeping (display may still turn off). Call from one thread consistently.</summary>
         public static void KeepSystemAwake(bool on)
         {

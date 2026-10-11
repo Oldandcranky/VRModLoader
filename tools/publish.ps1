@@ -5,13 +5,16 @@
 .EXAMPLE
   .\tools\publish.ps1 -Notes release-notes.md          # after committing; builds, tags v<VERSION>, pushes, releases
   .\tools\publish.ps1 -Notes notes.md -ReplaceAsset    # re-upload the exe on an existing release
+  .\tools\publish.ps1 -Notes notes.md -Exe build\VRModLoader.exe   # publish a staged build (launcher in use)
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Notes,
     [string]$Owner = 'Oldandcranky',
     [string]$Repo = 'VRModLoader',
     [switch]$ReplaceAsset,
-    [switch]$NoBuild
+    [switch]$NoBuild,
+    # upload this exe instead of building one (e.g. a staged build\VRModLoader.exe while the launcher is in use)
+    [string]$Exe
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -21,8 +24,9 @@ $version = (Get-Content (Join-Path $root 'VERSION') -Raw).Trim()
 $tag = "v$version"
 if ((git status --porcelain | Where-Object { $_ -notmatch 'src/Version.cs' })) { throw "Working tree has uncommitted changes - commit first." }
 
-if (-not $NoBuild) { & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'build.ps1') -NoShortcut; if ($LASTEXITCODE -ne 0) { throw 'build failed' } }
-$exe = Join-Path $root 'VRModLoader.exe'
+if (-not $NoBuild -and -not $Exe) { & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'build.ps1') -NoShortcut; if ($LASTEXITCODE -ne 0) { throw 'build failed' } }
+$exe = if ($Exe) { (Resolve-Path $Exe).Path } else { Join-Path $root 'VRModLoader.exe' }
+if ((Get-Item $exe).VersionInfo.FileVersion -notlike "$version.*") { throw "$exe is not version $version - build it first." }
 $assetName = "VRModLoader-$version.exe"
 
 $sha = (git rev-parse --short HEAD).Trim()

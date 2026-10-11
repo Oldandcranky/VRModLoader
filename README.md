@@ -81,7 +81,7 @@ opening CircuitLord's window.
 - **Headset link watch**: Meta's service log and SteamVR's monitor log are tailed. USB errors, `termination_reason`,
   SteamVR Standby and low headset battery show up red, pop a tray balloon, and go into the session record.
 - **OLED guard**: after 2 min without mouse/keyboard the screen goes near-black with a dim, drifting timer and a
-  small drifting live view. Any input brings the dashboard back.
+  small drifting live view, and the mouse pointer is hidden. Any input brings the dashboard back.
 - **Sleep guard**: the PC is held awake while a session runs (never the display).
 - **☠ KILL GAME + CLOSE ALL** does exactly that - it is the emergency stop, not the way to end a session. Quit the
   game from inside VR and the launcher tears everything down by itself after a cancellable countdown.
