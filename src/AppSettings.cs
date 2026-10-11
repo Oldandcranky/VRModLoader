@@ -43,6 +43,10 @@ namespace VRModLoader
         public StepConfig StepCircuitLord { get; set; }
         public StepConfig StepHeadsetProbe { get; set; }
         public StepConfig StepLaunchGame { get; set; }
+        /// <summary>Order the steps run in (step ids); "game" is always last.</summary>
+        public List<string> StepOrder { get; set; }
+        /// <summary>How the Quest connects: "auto", "cable" or "air" - changes the coaching and the pre-flight USB check.</summary>
+        public string LinkTransport { get; set; }
 
         // ---- overlays --------------------------------------------------------------------------
         public List<string> KillProcesses { get; set; }
@@ -107,6 +111,8 @@ namespace VRModLoader
             StepCircuitLord = new StepConfig(false, 20, 0);
             StepHeadsetProbe = new StepConfig(true, 60, 0);
             StepLaunchGame = new StepConfig(true, 60, 0);
+            StepOrder = new List<string>(LaunchEngine.DefaultOrder);
+            LinkTransport = "auto";
 
             KillProcesses = new List<string> { "Discord" };
             RestartDiscordAfter = true;
@@ -184,6 +190,8 @@ namespace VRModLoader
             if (StepHeadsetProbe == null) StepHeadsetProbe = new StepConfig(true, 60, 0);
             if (StepLaunchGame == null) StepLaunchGame = new StepConfig(true, 60, 0);
             if (KillProcesses == null) KillProcesses = new List<string> { "Discord" };
+            StepOrder = NormalizeOrder(StepOrder);
+            if (LinkTransport != "cable" && LinkTransport != "air") LinkTransport = "auto";
             if (TimeoutMultiplier < 0.25) TimeoutMultiplier = 0.25;
             if (TimeoutMultiplier > 5) TimeoutMultiplier = 5;
             if (AutoCloseCountdownSeconds < 0) AutoCloseCountdownSeconds = 0;
@@ -191,6 +199,20 @@ namespace VRModLoader
             if (OledGuardSeconds < 0) OledGuardSeconds = 0;
             if (OledGuardSeconds > 0 && OledGuardSeconds < 10) OledGuardSeconds = 10;
             if (string.IsNullOrEmpty(SteamVrUri)) SteamVrUri = "steam://run/250820";
+        }
+
+        /// <summary>Keeps every known step exactly once, drops unknown ids, pins "game" last.</summary>
+        public static List<string> NormalizeOrder(List<string> order)
+        {
+            var known = LaunchEngine.DefaultOrder;
+            var result = new List<string>();
+            if (order != null)
+                foreach (var id in order)
+                    if (id != null && id != "game" && Array.IndexOf(known, id) >= 0 && !result.Contains(id)) result.Add(id);
+            foreach (var id in known)
+                if (id != "game" && !result.Contains(id)) result.Add(id);
+            result.Add("game");
+            return result;
         }
 
         /// <summary>A saved path that no longer exists (game moved, app updated) is re-detected rather than left broken.</summary>

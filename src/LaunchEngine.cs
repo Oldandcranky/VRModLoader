@@ -81,19 +81,64 @@ namespace VRModLoader
         private string _sessionDir;
         private string _backupDir;
 
+        /// <summary>Every step id in its default order. "game" must stay last (the in-game watch follows it).</summary>
+        public static readonly string[] DefaultOrder = { "backup", "overlays", "meta", "link", "steamvr", "ea", "circuitlord", "probe", "game" };
+
+        private readonly Dictionary<string, Action<StepInfo, string, CancellationToken>> _bodies = new Dictionary<string, Action<StepInfo, string, CancellationToken>>();
+
+        public event Action StepsReordered;
+
         public LaunchEngine(AppSettings s, Logger log)
         {
             _s = s;
             _log = log;
-            Steps.Add(Make("backup", "Back up VR saves", s.StepBackup));
-            Steps.Add(Make("overlays", "Kill overlays (Discord)", s.StepKillOverlays));
-            Steps.Add(Make("meta", "Meta Horizon app", s.StepMetaHorizon));
-            Steps.Add(Make("link", "Headset Link (Quest on USB → Link)", s.StepHeadsetLink));
-            Steps.Add(Make("steamvr", "SteamVR", s.StepSteamVr));
-            Steps.Add(Make("ea", "EA app", s.StepEa));
-            Steps.Add(Make("circuitlord", "CircuitLord launcher window", s.StepCircuitLord));
-            Steps.Add(Make("probe", "Headset ready (OpenXR probe)", s.StepHeadsetProbe));
-            Steps.Add(Make("game", "Launch Titanfall 2 VR", s.StepLaunchGame));
+            var names = new Dictionary<string, string>
+            {
+                { "backup", "Back up VR saves" },
+                { "overlays", "Kill overlays (Discord)" },
+                { "meta", "Meta Horizon app" },
+                { "link", "Headset Link (cable or Air Link)" },
+                { "steamvr", "SteamVR" },
+                { "ea", "EA app" },
+                { "circuitlord", "CircuitLord launcher window" },
+                { "probe", "Headset ready (OpenXR probe)" },
+                { "game", "Launch Titanfall 2 VR" }
+            };
+            var cfgs = new Dictionary<string, StepConfig>
+            {
+                { "backup", s.StepBackup }, { "overlays", s.StepKillOverlays }, { "meta", s.StepMetaHorizon }, { "link", s.StepHeadsetLink },
+                { "steamvr", s.StepSteamVr }, { "ea", s.StepEa }, { "circuitlord", s.StepCircuitLord }, { "probe", s.StepHeadsetProbe }, { "game", s.StepLaunchGame }
+            };
+            _bodies["backup"] = StepBackup;
+            _bodies["overlays"] = StepKillOverlays;
+            _bodies["meta"] = StepMetaHorizon;
+            _bodies["link"] = StepHeadsetLink;
+            _bodies["steamvr"] = StepSteamVr;
+            _bodies["ea"] = StepEa;
+            _bodies["circuitlord"] = StepCircuitLord;
+            _bodies["probe"] = StepHeadsetProbe;
+            _bodies["game"] = StepLaunchGame;
+
+            s.StepOrder = AppSettings.NormalizeOrder(s.StepOrder);
+            foreach (var id in s.StepOrder) Steps.Add(Make(id, names[id], cfgs[id]));
+        }
+
+        /// <summary>Move a step up (-1) or down (+1) in the sequence; "game" stays last. Saved to settings.</summary>
+        public bool MoveStep(string id, int delta)
+        {
+            if (IsBusy) return false;
+            int i = Steps.FindIndex(x => x.Id == id);
+            int j = i + delta;
+            if (i < 0 || j < 0 || j >= Steps.Count) return false;
+            if (Steps[i].Id == "game" || Steps[j].Id == "game") return false;
+            var tmp = Steps[i];
+            Steps[i] = Steps[j];
+            Steps[j] = tmp;
+            _s.StepOrder = Steps.Select(x => x.Id).ToList();
+            _s.Save(_log);
+            _log.Info("SETTINGS", "Step order: " + string.Join(" → ", Steps.Select(x => x.Name)));
+            Raise(StepsReordered);
+            return true;
         }
 
         private static StepInfo Make(string id, string name, StepConfig cfg)
@@ -244,14 +289,11 @@ namespace VRModLoader
                     }
 
                     SetPhase(EnginePhase.Launching);
-                    RunStep("backup", ct, record, StepBackup);
-                    RunStep("overlays", ct, record, StepKillOverlays);
-                    RunStep("meta", ct, record, StepMetaHorizon);
-                    RunStep("link", ct, record, StepHeadsetLink);
-                    RunStep("steamvr", ct, record, StepSteamVr);
-                    RunStep("ea", ct, record, StepEa);
-                    RunStep("circuitlord", ct, record, StepCircuitLord);
-                    RunStep("probe", ct, record, StepHeadsetProbe);
+                    foreach (var step in Steps.ToList())
+                    {
+                        if (step.Id == "game") continue;
+                        RunStep(step.Id, ct, record, _bodies[step.Id]);
+                    }
                     bool launched = RunStep("game", ct, record, StepLaunchGame);
                     if (!launched || _gamePid == 0)
                     {
@@ -610,24 +652,26 @@ namespace VRModLoader
         }
 
         /// <summary>
-        /// Wait until the Quest is actually streaming over Link - with instructions for whoever holds the headset.
-        /// USB PID 5011 = plugged in, PID 5010 = Link mode; OculusDash.exe = Link active (also Air Link).
+        /// Wait until the Quest is actually streaming over Link - cable or Air Link - with instructions for whoever
+        /// holds the headset. Link is only ever started from the headset's Quick Settings; the PC cannot start it.
+        /// Signals: USB PID 5010 (cable in Link mode) or OculusDash.exe (Link active, cable or Air Link).
         /// </summary>
         private void StepHeadsetLink(StepInfo st, string cat, CancellationToken ct)
         {
             string pc = Environment.MachineName;
+            string transport = _s.LinkTransport ?? "auto";
             var usb = Headset.Usb();
-            _log.Info(cat, "Headset: " + Headset.Describe(usb) + (Headset.DashRunning() ? " · OculusDash running" : "") + " (" + usb.Interfaces + " USB interfaces)");
+            _log.Info(cat, "Headset: " + Headset.Describe(usb) + (Headset.DashRunning() ? " · OculusDash running" : "") + " · transport setting: " + transport);
             if (Headset.LinkActive(usb))
             {
-                st.Detail = "Link already active - " + Headset.Describe(usb);
+                st.Detail = "Link already active - " + (usb.State == UsbState.LinkMode ? Headset.Describe(usb) : "OculusDash running (Air Link or cable)");
                 return;
             }
 
+            string taps = "Put the headset on → tap the clock (Quick Settings) → Link → choose  " + pc + "  → Launch.";
             int timeout = _s.TimeoutMs(st.Config);
             var sw = Stopwatch.StartNew();
             UsbState last = (UsbState)(-1);
-            bool nudged = false;
             int lastLog = -10000;
             while (true)
             {
@@ -641,22 +685,29 @@ namespace VRModLoader
                     last = usb.State;
                     if (usb.State == UsbState.None)
                     {
-                        _log.Warn(cat, "No Quest on USB - waiting for the Link cable");
-                        Raise(Coach, "Connect the headset",
-                            "No headset on USB.\n\n"
-                            + "1.  Plug the Link cable into the headset AND into a USB 3 port on the back of the PC (not a hub, not the front panel).\n"
-                            + "2.  Wake the headset - press its power button or put it on.\n\n"
-                            + "Using Air Link instead?  Put the headset on → Quick Settings (tap the clock) → Link → " + pc + ".");
+                        if (transport == "cable")
+                        {
+                            _log.Warn(cat, "No Quest on USB - waiting for the Link cable");
+                            Raise(Coach, "Connect the headset",
+                                "No headset on USB.\n\n"
+                                + "1.  Plug the Link cable into the headset AND into a USB 3 port on the back of the PC (not a hub, not the front panel).\n"
+                                + "2.  " + taps);
+                        }
+                        else
+                        {
+                            _log.Info(cat, "Waiting for Link (Air Link or cable) - the headset is not on USB");
+                            Raise(Coach, "Start Link in the headset",
+                                taps + "\n\n"
+                                + "Air Link:  headset and PC on the same network (PC ideally on Ethernet, headset on 5 GHz / 6 GHz Wi-Fi).\n"
+                                + "Cable:  plug the Link cable into the headset and a USB 3 port on the back of the PC first.");
+                        }
                     }
                     else
                     {
                         _log.Info(cat, "Quest is on USB (serial " + usb.Serial + ") - Link has not started yet");
                         Raise(Coach, "Start Link in the headset",
-                            "The headset is connected over USB.\n\n"
-                            + "Put it on.  If \"Enable Link\" pops up → tap  Allow.\n"
-                            + "If nothing pops up → tap the clock (Quick Settings) → Link → choose  " + pc + "  → Launch.\n\n"
-                            + "The launcher just asked Meta to raise the prompt; the timeout dialog has a Nudge button to try again.");
-                        if (!nudged) { nudged = true; NudgeLinkPrompt(cat); }
+                            "The cable is connected.\n\n" + taps + "\n\n"
+                            + "An \"Allow\" prompt about the USB connection is not Link - Link only starts from Quick Settings.");
                     }
                 }
 
@@ -665,41 +716,27 @@ namespace VRModLoader
                 {
                     var snap = usb;
                     string msg = usb.State == UsbState.None
-                        ? "No headset detected on USB and Link is not running.\nPlug the Link cable in (both ends) and wake the headset."
-                        : "The headset is on USB (serial " + usb.Serial + ") but Link has not started.\nPut it on and tap Allow on the Link prompt, or Quick Settings → Link → " + pc + ".";
+                        ? "Link has not started (no cable detected either).\n" + taps
+                        : "The headset is on USB (serial " + usb.Serial + ") but Link has not started.\n" + taps;
                     throw new StepTimeoutException(msg,
-                        usb.State == UsbState.None ? null : "Nudge the Link prompt",
-                        delegate
-                        {
-                            NudgeLinkPrompt(cat);
-                            if (snap.InstanceId.Length > 0) Headset.RestartUsbDevice(snap.InstanceId, _log);
-                        });
+                        usb.State == UsbState.None ? null : "Re-plug the USB device (admin)",
+                        delegate { if (snap.InstanceId.Length > 0) Headset.RestartUsbDevice(snap.InstanceId, _log); });
                 }
                 if (elapsed - lastLog >= 5000)
                 {
                     lastLog = elapsed;
                     string left = ((timeout - elapsed) / 1000) + "s left";
-                    Detail(st, (usb.State == UsbState.None ? "no headset on USB" : "headset on USB - waiting for Link") + " (" + left + ")");
+                    Detail(st, (usb.State == UsbState.None ? "waiting for Link (Air Link or cable)" : "cable connected - waiting for Link") + " (" + left + ")");
                     _log.Debug(cat, "waiting for Link … " + Headset.Describe(usb) + " … " + left);
                 }
                 ct.WaitHandle.WaitOne(1000);
             }
 
             Raise(Coach, null, null);
-            _log.Ok(cat, "Link is active: " + Headset.Describe(usb) + (Headset.DashRunning() ? " · OculusDash running" : ""));
+            string via = usb.State == UsbState.LinkMode ? "cable (USB Link mode)" : "Air Link / OculusDash";
+            _log.Ok(cat, "Link is active via " + via + " after " + ProcessUtil.FormatSeconds(sw.Elapsed.TotalSeconds));
             Settle(st, cat, ct);
-            st.Detail = "Link active - " + Headset.Describe(Headset.Usb());
-        }
-
-        /// <summary>
-        /// Any VR app that registers with Meta's service makes it call launchLink(), which raises the "Enable Link"
-        /// prompt in a worn headset. The mod's own xr_probe is the cheapest such app we have.
-        /// </summary>
-        private void NudgeLinkPrompt(string cat)
-        {
-            _log.Info(cat, "Nudging Meta to launch Link (one xr_probe run makes the service call launchLink)");
-            try { XrProbe.Run(_s.GamePath, 15000, _log, false); }
-            catch (Exception ex) { _log.Debug(cat, "nudge failed: " + ex.Message); }
+            st.Detail = "Link active via " + via;
         }
 
         private void StepSteamVr(StepInfo st, string cat, CancellationToken ct)

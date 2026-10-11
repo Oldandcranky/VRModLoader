@@ -3,6 +3,19 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.2.1 - 2026-10-10
+
+### Added
+- **Reorderable launch sequence**: ▲▼ on every step row; the order is saved. "Launch Titanfall 2 VR" stays last.
+- **Air Link is first-class**: the Headset Link step waits for Link over Wi-Fi or cable (OculusDash / USB Link mode)
+  and the coaching says exactly what to tap. Settings → Launch has a "Headset connects via" choice (auto / cable /
+  Air Link) that only changes the coaching and whether a missing cable is a warning.
+
+### Removed
+- The automatic "nudge": asking Meta to raise a prompt only produced the USB-connection prompt, which does not start
+  Link. Link is always started from the headset's Quick Settings. The USB re-plug stays as a manual option on the
+  timeout dialog when a cable is present.
+
 ## 1.2.0 - 2026-10-10
 
 ### Added

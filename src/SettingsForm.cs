@@ -17,6 +17,7 @@ namespace VRModLoader
         private CheckBox _focus, _tidy, _restore;
         private CheckBox _liveView, _dashboard, _sleep;
         private NumericUpDown _oled;
+        private CheckBox _tAuto, _tCable, _tAir;
         private NumericUpDown _keep, _countdown, _threshold;
 
         public SettingsForm(AppSettings s, Logger log)
@@ -81,6 +82,25 @@ namespace VRModLoader
 
             Section(grid, "Launch");
             _direct = CheckRowCtl(grid, "Direct launch (replicates CircuitLord's \"Launch in VR\"; off = always open CircuitLord's window)", s.DirectLaunch);
+            var tRow = Flow();
+            tRow.Controls.Add(FlowLabel("Headset connects via:"));
+            _tAuto = Theme.Check("Auto (either)", s.LinkTransport != "cable" && s.LinkTransport != "air");
+            _tCable = Theme.Check("Link cable (USB)", s.LinkTransport == "cable");
+            _tAir = Theme.Check("Air Link (Wi-Fi)", s.LinkTransport == "air");
+            CheckBox[] radios = { _tAuto, _tCable, _tAir };
+            foreach (var rb in radios)
+            {
+                rb.Margin = Theme.Pad(12, 3, 0, 0);
+                var me = rb;
+                rb.CheckedChanged += delegate
+                {
+                    if (!me.Checked) { if (!radios.Any(x => x.Checked)) me.Checked = true; return; }
+                    foreach (var other in radios) if (other != me && other.Checked) other.Checked = false;
+                };
+                tRow.Controls.Add(rb);
+            }
+            Row(grid, "", tRow);
+            Hint(grid, "Only changes the coaching text and whether a missing cable is a warning. Link itself is always started from the headset's Quick Settings.");
 
             Section(grid, "Save backups");
             var keepRow = Flow();
@@ -284,6 +304,7 @@ namespace VRModLoader
             _s.KillProcesses = _kill.Text.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(ProcessUtil.Clean).Where(x => x.Length > 0).ToList();
             _s.RestartDiscordAfter = _restartDiscord.Checked;
             _s.DirectLaunch = _direct.Checked;
+            _s.LinkTransport = _tCable.Checked ? "cable" : _tAir.Checked ? "air" : "auto";
             _s.BackupKeep = (int)_keep.Value;
             _s.BackupSkipVideos = _skipVideos.Checked;
             _s.AutoCloseAfterGame = _autoClose.Checked;

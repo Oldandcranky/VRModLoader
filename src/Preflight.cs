@@ -105,9 +105,13 @@ namespace VRModLoader
 
             var quest = Headset.Usb();
             bool dash = Headset.DashRunning();
-            Add(r, log, "Headset (USB)", quest.State == UsbState.None && !dash ? CheckStatus.Warn : CheckStatus.Ok,
+            string transport = s.LinkTransport ?? "auto";
+            bool noLinkYet = quest.State == UsbState.None && !dash;
+            Add(r, log, "Headset link", !noLinkYet ? CheckStatus.Ok : (transport == "cable" ? CheckStatus.Warn : CheckStatus.Info),
                 Headset.Describe(quest) + (dash ? " · Link active (OculusDash running)" : "")
-                + (quest.State == UsbState.None && !dash ? " - plug the Link cable in; the Headset Link step waits for it" : ""));
+                + (noLinkYet ? (transport == "cable" ? " - plug the Link cable in; the Headset Link step waits for it"
+                                                     : " - fine for Air Link; the Headset Link step waits until Link is started from the headset") : "")
+                + " · transport: " + transport);
 
             bool steam = ProcessUtil.IsRunning("steam");
             Add(r, log, "Steam", steam ? CheckStatus.Ok : CheckStatus.Warn,

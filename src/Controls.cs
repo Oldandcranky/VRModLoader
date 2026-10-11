@@ -103,10 +103,13 @@ namespace VRModLoader
         private readonly NumericUpDown _timeout;
         private readonly Label _unit;
         private readonly Label _status;
+        private readonly Button _up, _down;
         private readonly ToolTip _tip = new ToolTip();
         private bool _loading = true;
 
         public event Action ConfigChanged;
+        public event Action MoveUp;
+        public event Action MoveDown;
 
         public StepRow(StepInfo step)
         {
@@ -156,16 +159,46 @@ namespace VRModLoader
             _status.Size = Theme.Sz(92, 22);
             _status.Anchor = AnchorStyles.Right | AnchorStyles.Top;
 
+            _up = MoveButton("▲", "Move this step up");
+            _up.Click += delegate { if (MoveUp != null) MoveUp(); };
+            _down = MoveButton("▼", "Move this step down");
+            _down.Click += delegate { if (MoveDown != null) MoveDown(); };
+
             Controls.Add(_enabled);
             Controls.Add(_name);
             Controls.Add(_detail);
             Controls.Add(_timeout);
             Controls.Add(_unit);
             Controls.Add(_status);
+            Controls.Add(_up);
+            Controls.Add(_down);
             Resize += delegate { Relayout(); };
             Relayout();
             Apply();
             _loading = false;
+        }
+
+        private Button MoveButton(string glyph, string tip)
+        {
+            var b = Theme.Button(glyph, false);
+            b.AutoSize = false;
+            b.Size = Theme.Sz(24, 20);
+            b.Font = Theme.Small;
+            b.ForeColor = Theme.Dim;
+            b.BackColor = Theme.Panel;
+            b.FlatAppearance.BorderSize = 0;
+            b.FlatAppearance.MouseOverBackColor = Theme.Panel2;
+            b.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+            b.TabStop = false;
+            _tip.SetToolTip(b, tip);
+            return b;
+        }
+
+        /// <summary>Up/down availability (first row, last movable row) and whether moving is allowed at all right now.</summary>
+        public void SetMove(bool canUp, bool canDown, bool enabled)
+        {
+            _up.Visible = enabled && canUp;
+            _down.Visible = enabled && canDown;
         }
 
         private void Relayout()
@@ -173,7 +206,10 @@ namespace VRModLoader
             _status.Location = new Point(Width - _status.Width - Theme.S(8), (Height - _status.Height) / 2);
             _timeout.Location = new Point(_status.Left - Theme.S(14) - _timeout.Width, (Height - _timeout.Height) / 2);
             _unit.Location = new Point(_timeout.Right + Theme.S(2), _timeout.Top + (_timeout.Height - _unit.Height) / 2);
-            _detail.Width = Math.Max(Theme.S(40), _timeout.Left - _detail.Left - Theme.S(8));
+            int mid = Height / 2;
+            _up.Location = new Point(_timeout.Left - Theme.S(10) - _up.Width, mid - _up.Height);
+            _down.Location = new Point(_up.Left, mid);
+            _detail.Width = Math.Max(Theme.S(40), _up.Left - _detail.Left - Theme.S(8));
         }
 
         public void Apply()

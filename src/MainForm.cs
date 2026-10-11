@@ -176,6 +176,7 @@ namespace VRModLoader
             _live = new LiveView(this);
             _engine.FocusRequested += delegate { Ui(delegate { if (_fullscreen && !_inTray) WindowUtil.ForceForeground(Handle); }); };
             _engine.Coach += delegate(string title, string body) { Ui(delegate { ShowCoach(title, body); }); };
+            _engine.StepsReordered += delegate { Ui(delegate { BuildStepRows(); }); };
             _engine.Alert += delegate(string title, string msg)
             {
                 Ui(delegate
@@ -351,7 +352,7 @@ namespace VRModLoader
             _stepsCard.Padding = Theme.Pad(12, 10, 12, 6);
             var stTitle = Theme.SectionTitle("Launch sequence");
             stTitle.Dock = DockStyle.Top;
-            var stHint = Theme.Label("tick = enabled   ·   number = timeout in seconds   ·   each step waits for the real process", Theme.Dim, Theme.Small);
+            var stHint = Theme.Label("tick = enabled   ·   number = timeout in seconds   ·   ▲▼ reorder (launch stays last)   ·   each step waits for the real thing", Theme.Dim, Theme.Small);
             stHint.Dock = DockStyle.Top;
             stHint.Padding = Theme.Pad(0, 0, 0, 6);
             _stepsCard.Controls.Add(stHint);
@@ -600,15 +601,37 @@ namespace VRModLoader
         private void BuildStepRows()
         {
             _stepsCard.SuspendLayout();
+            foreach (var old in _rows.Values) { _stepsCard.Controls.Remove(old); old.Dispose(); }
+            _rows.Clear();
             foreach (var st in _engine.Steps)
             {
                 var row = new StepRow(st);
-                row.ConfigChanged += delegate { _s.Save(_log); _log.Debug("SETTINGS", "Step '" + st.Name + "' → enabled=" + st.Config.Enabled + ", timeout=" + st.Config.TimeoutSeconds + "s"); };
+                var step = st;
+                row.ConfigChanged += delegate { _s.Save(_log); _log.Debug("SETTINGS", "Step '" + step.Name + "' → enabled=" + step.Config.Enabled + ", timeout=" + step.Config.TimeoutSeconds + "s"); };
+                row.MoveUp += delegate { _engine.MoveStep(step.Id, -1); };
+                row.MoveDown += delegate { _engine.MoveStep(step.Id, +1); };
                 _rows[st.Id] = row;
                 _stepsCard.Controls.Add(row);
                 row.BringToFront();
             }
             _stepsCard.ResumeLayout();
+            UpdateMoveButtons();
+        }
+
+        /// <summary>First row can't go up, the row above "game" can't go down, "game" never moves, nothing moves while running.</summary>
+        private void UpdateMoveButtons()
+        {
+            bool enabled = _engine != null && !_engine.IsBusy;
+            var steps = _engine.Steps;
+            for (int i = 0; i < steps.Count; i++)
+            {
+                StepRow row;
+                if (!_rows.TryGetValue(steps[i].Id, out row)) continue;
+                bool isGame = steps[i].Id == "game";
+                bool canUp = i > 0 && !isGame;
+                bool canDown = i < steps.Count - 2 && !isGame;   // the slot just above "game" is the lowest a step can go
+                row.SetMove(canUp, canDown, enabled);
+            }
         }
 
         private Control BuildRight()
@@ -1198,6 +1221,7 @@ namespace VRModLoader
                 if (p != EnginePhase.Crashed) _statusGame.Text = "No game running";
             }
             _closeAll.Text = p == EnginePhase.InGame ? "☠  KILL GAME + CLOSE ALL" : "⏏  CLOSE ALL";
+            UpdateMoveButtons();
 
             // sleep guard: hold the PC awake while a session runs (never the display - OLED)
             bool wantAwake = _s.SleepGuard && (p == EnginePhase.Launching || p == EnginePhase.InGame || p == EnginePhase.Countdown || p == EnginePhase.ShuttingDown);

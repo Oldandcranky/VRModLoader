@@ -43,13 +43,14 @@ writes them to `settings.json`, and everything is editable in Settings.
 
 ## Smart waits
 
-Each step has a readiness signal, a timeout (editable in its row) and a global multiplier:
+Each step has a readiness signal, a timeout (editable in its row) and a global multiplier. Steps can be reordered
+with the ▲▼ buttons on each row (the launch step stays last); the order is saved in `settings.json`.
 
 | Step | Ready when |
 |---|---|
 | Kill overlays | none of the kill-list processes remain |
 | Meta Horizon | `OVRServer_x64` **and** the Meta client (`Client.exe` under `Meta Horizon\Support\oculus-client`; `OculusClient.exe` is only a 0-byte alias) |
-| Headset Link | the Quest is streaming: USB `VID_2833&PID_5010` (it re-enumerates from `PID_5011` when Link starts) **or** `OculusDash.exe` running (also Air Link). While waiting, a banner tells the person holding the headset what to do, and Meta is nudged to raise the "Enable Link" prompt. |
+| Headset Link | the Quest is streaming - cable: USB `VID_2833&PID_5010` (it re-enumerates from `PID_5011` when Link starts); Air Link or cable: `OculusDash.exe` running. Link can only be started from the headset (Quick Settings → Link → your PC); while waiting, a banner tells the person holding the headset exactly that. |
 | SteamVR | `vrserver`, `vrmonitor` **and** `vrcompositor` (the compositor only appears once SteamVR sees the headset) |
 | EA app | `EADesktop` |
 | Headset probe | the mod's own `TF2VR\tools\xr_probe.exe --inventory` reports no `XR_ERROR_*` - OpenXR can see the headset. Retries every 3 s. |
