@@ -75,9 +75,10 @@ namespace VRModLoader
         private LiveView _live;
         private bool _liveLogged;
         private bool _liveRestoredLogged;
-        private LiveView _liveVrmon;          // picture of the SteamVR Status window
-        private Panel _vrmonPanel;
+        private ImagePanel _vrmonPanel;       // PrintWindow capture of the SteamVR Status window
         private Label _vrmonHint;
+        private Bitmap _vrmonBmp;
+        private bool _vrmonLogged;
         private LinkQualityPanel _linkPanel;
         private TimeSpan _played;
         private bool _guardActive;
@@ -180,7 +181,6 @@ namespace VRModLoader
             _engine.SessionEnded += delegate(SessionRecord r) { Ui(delegate { OnSessionEnded(r); }); };
             _engine.GameDetected += delegate { Ui(delegate { OnGameDetected(); }); };
             _live = new LiveView(this);
-            _liveVrmon = new LiveView(this);
             _engine.FocusRequested += delegate { Ui(delegate { if (_fullscreen && !_inTray) WindowUtil.ForceForeground(Handle); }); };
             _engine.Coach += delegate(string title, string body) { Ui(delegate { ShowCoach(title, body); }); };
             _engine.StepsReordered += delegate { Ui(delegate { BuildStepRows(); }); };
@@ -969,9 +969,8 @@ namespace VRModLoader
             side.RowStyles.Add(new RowStyle(SizeType.Absolute, S(372)));
             side.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-            _vrmonPanel = new Panel();
+            _vrmonPanel = new ImagePanel();
             _vrmonPanel.Dock = DockStyle.Fill;
-            _vrmonPanel.BackColor = Color.Black;
             _vrmonPanel.Margin = new Padding(0);
             _vrmonHint = Theme.Label("The SteamVR Status window appears here while SteamVR runs", Theme.Dim, Theme.Small);
             _vrmonHint.AutoSize = false;
@@ -979,7 +978,6 @@ namespace VRModLoader
             _vrmonHint.TextAlign = ContentAlignment.MiddleCenter;
             _vrmonHint.Padding = Theme.Pad(10, 0, 10, 0);
             _vrmonPanel.Controls.Add(_vrmonHint);
-            _vrmonPanel.Resize += delegate { PositionLiveView(); };
 
             _linkPanel = new LinkQualityPanel();
             _linkPanel.Dock = DockStyle.Fill;
@@ -1018,11 +1016,6 @@ namespace VRModLoader
                 else if (!WantPictures) _live.Place(Rectangle.Empty, false, 255);
                 else _live.Place(ClientRectOf(_livePanel, S(4)), true, 255);
             }
-            if (_liveVrmon != null && _liveVrmon.Attached)
-            {
-                if (_guardActive || !WantPictures || _vrmonPanel == null) _liveVrmon.Place(Rectangle.Empty, false, 255);
-                else _liveVrmon.Place(ClientRectOf(_vrmonPanel, S(2)), true, 255);
-            }
         }
 
         private void UpdateLiveView()
@@ -1034,51 +1027,58 @@ namespace VRModLoader
                 _linkPanel.Update(_engine != null ? _engine.Watcher : null, _engine != null && _engine.InGame);
         }
 
-        /// <summary>Live picture of the SteamVR Status window (device icons + frame graph) whenever SteamVR runs.</summary>
+        /// <summary>
+        /// Picture of the SteamVR Status window (device icons + frame graph) via PrintWindow, refreshed each tick while
+        /// the LIVE VIEW tab is showing. PrintWindow reads the DWM surface, so it works even with the launcher on top.
+        /// </summary>
         private void UpdateVrmonView()
         {
-            if (_liveVrmon == null || _vrmonHint == null) return;
+            if (_vrmonPanel == null || _vrmonHint == null) return;
             if (!ProcessUtil.IsRunning("vrmonitor"))
             {
-                if (_liveVrmon.Attached) _liveVrmon.Detach();
+                ClearVrmon();
                 _vrmonHint.Text = "SteamVR is not running - its status window appears here when it is";
                 _vrmonHint.Visible = true;
                 return;
             }
-            if (!_liveVrmon.Attached || !_liveVrmon.SourceAlive)
+            if (!WantPictures) return;   // only capture while the tab is on screen
+
+            string title; Rectangle b;
+            IntPtr h = WindowUtil.FindLargestWindow("vrmonitor", out title, out b);
+            if (h == IntPtr.Zero)
             {
-                string title; Rectangle b;
-                IntPtr h = WindowUtil.FindLargestWindow("vrmonitor", out title, out b);
-                if (h != IntPtr.Zero && _liveVrmon.Attach(h, title))
-                {
-                    _vrmonHint.Visible = false;
-                    PositionLiveView();
-                    _log.Debug("LIVEVIEW", "SteamVR status window pictured (\"" + title + "\", " + b.Width + "x" + b.Height + ")");
-                }
-                else
-                {
-                    _vrmonHint.Text = "Waiting for the SteamVR Status window…";
-                    _vrmonHint.Visible = true;
-                }
+                _vrmonHint.Text = "Waiting for the SteamVR Status window…";
+                _vrmonHint.Visible = true;
                 return;
             }
-            if (_liveVrmon.SourceMinimized)
+            if (WindowUtil.IsMinimized(h))
             {
-                if (WantPictures)
-                {
-                    bool stole = WindowUtil.RestoreBehind(_liveVrmon.Source, Handle);
-                    if (stole) WindowUtil.ForceForeground(Handle);
-                    _log.Debug("LIVEVIEW", "SteamVR Status window was minimized - restored behind the launcher" + (stole ? " (activating restore)" : ""));
-                    PositionLiveView();
-                }
+                bool stole = WindowUtil.RestoreBehind(h, Handle);
+                if (stole) WindowUtil.ForceForeground(Handle);
                 _vrmonHint.Text = "Restoring the SteamVR window…";
                 _vrmonHint.Visible = true;
+                return;
             }
-            else
+            var shot = WindowCapture.Snapshot(h);
+            if (shot == null)
             {
-                _vrmonHint.Visible = false;
-                PositionLiveView();
+                _vrmonHint.Text = "Capturing the SteamVR window…";
+                _vrmonHint.Visible = true;
+                return;
             }
+            _vrmonHint.Visible = false;
+            var old = _vrmonBmp;
+            _vrmonBmp = shot;
+            _vrmonPanel.SetImage(shot);
+            if (old != null) old.Dispose();
+            if (!_vrmonLogged) { _vrmonLogged = true; _log.Debug("LIVEVIEW", "SteamVR Status window captured via PrintWindow (" + shot.Width + "x" + shot.Height + ")"); }
+        }
+
+        private void ClearVrmon()
+        {
+            _vrmonLogged = false;
+            if (_vrmonPanel != null) _vrmonPanel.SetImage(null);
+            if (_vrmonBmp != null) { _vrmonBmp.Dispose(); _vrmonBmp = null; }
         }
 
         private void UpdateGameView()
@@ -1672,7 +1672,7 @@ namespace VRModLoader
             if (_didMinimizeAll) { _didMinimizeAll = false; WindowUtil.UndoMinimizeAll(_log); }
             if (_awake) { _awake = false; WindowUtil.KeepSystemAwake(false); }
             if (_live != null) _live.Dispose();
-            if (_liveVrmon != null) _liveVrmon.Dispose();
+            if (_vrmonBmp != null) { _vrmonBmp.Dispose(); _vrmonBmp = null; }
             _flush.Stop();
             _clock.Stop();
             if (_tray != null) { _tray.Visible = false; _tray.Dispose(); }

@@ -283,6 +283,35 @@ namespace VRModLoader
         }
     }
 
+    /// <summary>A double-buffered panel that paints a single image aspect-fit (used for the PrintWindow-captured SteamVR box).</summary>
+    internal sealed class ImagePanel : Panel
+    {
+        private Image _img;
+
+        public ImagePanel()
+        {
+            DoubleBuffered = true;
+            ResizeRedraw = true;
+            BackColor = Color.Black;
+        }
+
+        public void SetImage(Image img) { _img = img; Invalidate(); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            if (_img == null) return;
+            var cr = ClientRectangle;
+            if (cr.Width < 2 || cr.Height < 2) return;
+            double s = Math.Min((double)cr.Width / _img.Width, (double)cr.Height / _img.Height);
+            if (s <= 0) return;
+            int w = Math.Max(1, (int)(_img.Width * s)), h = Math.Max(1, (int)(_img.Height * s));
+            var dest = new Rectangle(cr.X + (cr.Width - w) / 2, cr.Y + (cr.Height - h) / 2, w, h);
+            e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            try { e.Graphics.DrawImage(_img, dest); } catch { }
+        }
+    }
+
     /// <summary>Air Link / USB Link quality from Meta's per-second round-trip samples: big number, averages, sparkline.</summary>
     internal sealed class LinkQualityPanel : Panel
     {

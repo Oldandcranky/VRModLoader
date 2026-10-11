@@ -134,6 +134,11 @@ namespace VRModLoader
             return best;
         }
 
+        public static bool IsMinimized(IntPtr hwnd)
+        {
+            try { return hwnd != IntPtr.Zero && IsIconic(hwnd); } catch { return false; }
+        }
+
         /// <summary>Milliseconds since the last mouse/keyboard input anywhere on the PC.</summary>
         public static int IdleMilliseconds()
         {

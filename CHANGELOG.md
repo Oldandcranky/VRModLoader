@@ -3,6 +3,13 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.3.2 - 2026-10-10
+
+### Fixed
+- SteamVR Status box was black. The DWM thumbnail would not render into that panel inside the fullscreen launcher;
+  switched it to a PrintWindow (`PW_RENDERFULLCONTENT`) capture refreshed ~once a second, which reads the DWM surface
+  and works with the launcher on top. The game view keeps the live DWM thumbnail.
+
 ## 1.3.1 - 2026-10-10
 
 ### Fixed
