@@ -1,0 +1,14 @@
+# runtime data the launcher writes next to itself
+Logs/
+Backups/
+Sessions/
+settings.json
+
+# build output (the exe ships as a GitHub release asset, not in git)
+*.exe
+*.pdb
+build/
+assets/app-256.png
+
+# generated from VERSION by build.ps1
+src/Version.cs
