@@ -51,7 +51,7 @@ if (-not $pw) { throw 'No GitHub credential available from Git Credential Manage
 $h = @{ Authorization = "token $pw"; Accept = 'application/vnd.github+json'; 'User-Agent' = 'VRModLoader-publish' }
 $api = "https://api.github.com/repos/$Owner/$Repo"
 
-$body = Get-Content $Notes -Raw
+$body = [System.IO.File]::ReadAllText((Resolve-Path $Notes).Path)   # plain string - Get-Content -Raw carries PS metadata that ConvertTo-Json would serialize
 try { $rel = Invoke-RestMethod -Headers $h -Uri "$api/releases/tags/$tag"; Write-Host ">> release exists: $($rel.html_url)" }
 catch {
     $rel = Invoke-RestMethod -Method Post -Headers $h -Uri "$api/releases" -ContentType 'application/json' `
