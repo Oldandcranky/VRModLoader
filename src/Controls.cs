@@ -103,13 +103,20 @@ namespace VRModLoader
         private readonly NumericUpDown _timeout;
         private readonly Label _unit;
         private readonly Label _status;
-        private readonly Button _up, _down;
+        private readonly Label _grip;
         private readonly ToolTip _tip = new ToolTip();
         private bool _loading = true;
 
+        // drag-to-reorder
+        private bool _mouseDown, _dragging;
+        private Point _downAt;
+        public bool CanDrag = true;
+        public bool Dragging { get { return _dragging; } }
+
         public event Action ConfigChanged;
-        public event Action MoveUp;
-        public event Action MoveDown;
+        /// <summary>Raised while the row is being dragged (read Control.MousePosition for where it is).</summary>
+        public event Action<StepRow> DragMoved;
+        public event Action<StepRow> DragEnded;
 
         public StepRow(StepInfo step)
         {
@@ -159,10 +166,12 @@ namespace VRModLoader
             _status.Size = Theme.Sz(92, 22);
             _status.Anchor = AnchorStyles.Right | AnchorStyles.Top;
 
-            _up = MoveButton("▲", "Move this step up");
-            _up.Click += delegate { if (MoveUp != null) MoveUp(); };
-            _down = MoveButton("▼", "Move this step down");
-            _down.Click += delegate { if (MoveDown != null) MoveDown(); };
+            _grip = Theme.Label("⋮⋮", Theme.Border, Theme.UIBold);
+            _grip.AutoSize = false;
+            _grip.Size = Theme.Sz(18, 22);
+            _grip.TextAlign = ContentAlignment.MiddleCenter;
+            _grip.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+            _tip.SetToolTip(_grip, "Drag to reorder");
 
             Controls.Add(_enabled);
             Controls.Add(_name);
@@ -170,47 +179,69 @@ namespace VRModLoader
             Controls.Add(_timeout);
             Controls.Add(_unit);
             Controls.Add(_status);
-            Controls.Add(_up);
-            Controls.Add(_down);
+            Controls.Add(_grip);
+            foreach (Control c in new Control[] { this, _name, _detail, _status, _grip })
+            {
+                c.MouseDown += OnDragDown;
+                c.MouseMove += OnDragMove;
+                c.MouseUp += OnDragUp;
+            }
             Resize += delegate { Relayout(); };
             Relayout();
             Apply();
             _loading = false;
         }
 
-        private Button MoveButton(string glyph, string tip)
+        private bool Draggable { get { return CanDrag && Step.Id != "game"; } }
+
+        private void OnDragDown(object sender, MouseEventArgs e)
         {
-            var b = Theme.Button(glyph, false);
-            b.AutoSize = false;
-            b.Size = Theme.Sz(24, 20);
-            b.Font = Theme.Small;
-            b.ForeColor = Theme.Dim;
-            b.BackColor = Theme.Panel;
-            b.FlatAppearance.BorderSize = 0;
-            b.FlatAppearance.MouseOverBackColor = Theme.Panel2;
-            b.Anchor = AnchorStyles.Right | AnchorStyles.Top;
-            b.TabStop = false;
-            _tip.SetToolTip(b, tip);
-            return b;
+            if (e.Button != MouseButtons.Left || !Draggable) return;
+            _mouseDown = true;
+            _dragging = false;
+            _downAt = Control.MousePosition;
+            ((Control)sender).Capture = true;
         }
 
-        /// <summary>Up/down availability (first row, last movable row) and whether moving is allowed at all right now.</summary>
-        public void SetMove(bool canUp, bool canDown, bool enabled)
+        private void OnDragMove(object sender, MouseEventArgs e)
         {
-            _up.Visible = enabled && canUp;
-            _down.Visible = enabled && canDown;
+            if (!_mouseDown)
+            {
+                ((Control)sender).Cursor = Draggable ? Cursors.SizeAll : Cursors.Default;
+                return;
+            }
+            if (!_dragging)
+            {
+                if (Math.Abs(Control.MousePosition.Y - _downAt.Y) < Theme.S(5)) return;
+                _dragging = true;
+                BackColor = Theme.Panel2;
+                Invalidate();
+            }
+            if (DragMoved != null) DragMoved(this);
+        }
+
+        private void OnDragUp(object sender, MouseEventArgs e)
+        {
+            if (!_mouseDown) return;
+            _mouseDown = false;
+            ((Control)sender).Capture = false;
+            bool was = _dragging;
+            _dragging = false;
+            Apply();
+            if (was && DragEnded != null) DragEnded(this);
         }
 
         private void Relayout()
         {
-            _status.Location = new Point(Width - _status.Width - Theme.S(8), (Height - _status.Height) / 2);
+            _grip.Location = new Point(Width - _grip.Width - Theme.S(4), (Height - _grip.Height) / 2);
+            _grip.Visible = Draggable;
+            _status.Location = new Point(_grip.Left - _status.Width - Theme.S(2), (Height - _status.Height) / 2);
             _timeout.Location = new Point(_status.Left - Theme.S(14) - _timeout.Width, (Height - _timeout.Height) / 2);
             _unit.Location = new Point(_timeout.Right + Theme.S(2), _timeout.Top + (_timeout.Height - _unit.Height) / 2);
-            int mid = Height / 2;
-            _up.Location = new Point(_timeout.Left - Theme.S(10) - _up.Width, mid - _up.Height);
-            _down.Location = new Point(_up.Left, mid);
-            _detail.Width = Math.Max(Theme.S(40), _up.Left - _detail.Left - Theme.S(8));
+            _detail.Width = Math.Max(Theme.S(40), _timeout.Left - _detail.Left - Theme.S(8));
         }
+
+        public void RefreshDragState() { _grip.Visible = Draggable; Cursor = Draggable ? Cursors.SizeAll : Cursors.Default; }
 
         public void Apply()
         {
@@ -230,7 +261,7 @@ namespace VRModLoader
             _status.ForeColor = color;
             _detail.Text = Step.Detail ?? "";
             _detail.ForeColor = Step.State == StepState.Failed || Step.State == StepState.TimedOut ? color : Theme.Dim;
-            BackColor = Step.State == StepState.Running ? Theme.Panel2 : Theme.Panel;
+            BackColor = Step.State == StepState.Running || _dragging ? Theme.Panel2 : Theme.Panel;
             _tip.SetToolTip(_detail, Step.Detail);
             Invalidate();
         }
@@ -238,7 +269,8 @@ namespace VRModLoader
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            Color bar = Step.State == StepState.Running ? Theme.Accent
+            Color bar = _dragging ? Theme.Accent2
+                : Step.State == StepState.Running ? Theme.Accent
                 : Step.State == StepState.Done ? Theme.Ok
                 : Step.State == StepState.Failed ? Theme.Error
                 : Step.State == StepState.TimedOut || Step.State == StepState.Cancelled ? Theme.Warn

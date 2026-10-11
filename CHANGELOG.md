@@ -3,6 +3,13 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.2.2 - 2026-10-10
+
+### Changed
+- Reorder the launch sequence by **dragging a step row** (grab its name and move it; the other rows make room live).
+  The ▲▼ buttons from 1.2.1 are gone. The launch row still stays last.
+- `tools\publish.ps1`: tag, push and publish a release with the exe attached, using the stored git credential.
+
 ## 1.2.1 - 2026-10-10
 
 ### Added

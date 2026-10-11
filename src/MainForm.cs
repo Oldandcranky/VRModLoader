@@ -352,7 +352,7 @@ namespace VRModLoader
             _stepsCard.Padding = Theme.Pad(12, 10, 12, 6);
             var stTitle = Theme.SectionTitle("Launch sequence");
             stTitle.Dock = DockStyle.Top;
-            var stHint = Theme.Label("tick = enabled   ·   number = timeout in seconds   ·   ▲▼ reorder (launch stays last)   ·   each step waits for the real thing", Theme.Dim, Theme.Small);
+            var stHint = Theme.Label("tick = enabled   ·   number = timeout in seconds   ·   drag a step to reorder (launch stays last)", Theme.Dim, Theme.Small);
             stHint.Dock = DockStyle.Top;
             stHint.Padding = Theme.Pad(0, 0, 0, 6);
             _stepsCard.Controls.Add(stHint);
@@ -598,40 +598,64 @@ namespace VRModLoader
             host.Controls.Add(b);
         }
 
+        private readonly List<StepRow> _visual = new List<StepRow>();   // rows in their current on-screen order
+
         private void BuildStepRows()
         {
             _stepsCard.SuspendLayout();
             foreach (var old in _rows.Values) { _stepsCard.Controls.Remove(old); old.Dispose(); }
             _rows.Clear();
+            _visual.Clear();
             foreach (var st in _engine.Steps)
             {
                 var row = new StepRow(st);
                 var step = st;
                 row.ConfigChanged += delegate { _s.Save(_log); _log.Debug("SETTINGS", "Step '" + step.Name + "' → enabled=" + step.Config.Enabled + ", timeout=" + step.Config.TimeoutSeconds + "s"); };
-                row.MoveUp += delegate { _engine.MoveStep(step.Id, -1); };
-                row.MoveDown += delegate { _engine.MoveStep(step.Id, +1); };
+                row.DragMoved += OnRowDragMoved;
+                row.DragEnded += OnRowDragEnded;
                 _rows[st.Id] = row;
+                _visual.Add(row);
                 _stepsCard.Controls.Add(row);
                 row.BringToFront();
             }
             _stepsCard.ResumeLayout();
-            UpdateMoveButtons();
+            UpdateDragState();
         }
 
-        /// <summary>First row can't go up, the row above "game" can't go down, "game" never moves, nothing moves while running.</summary>
-        private void UpdateMoveButtons()
+        /// <summary>Dragging is off while a sequence runs; the launch row never moves.</summary>
+        private void UpdateDragState()
         {
             bool enabled = _engine != null && !_engine.IsBusy;
-            var steps = _engine.Steps;
-            for (int i = 0; i < steps.Count; i++)
+            foreach (var row in _rows.Values) { row.CanDrag = enabled; row.RefreshDragState(); }
+        }
+
+        /// <summary>Live reorder: the dragged row jumps to whichever row the cursor is over, never below the launch row.</summary>
+        private void OnRowDragMoved(StepRow row)
+        {
+            var pt = _stepsCard.PointToClient(Control.MousePosition);
+            int from = _visual.IndexOf(row);
+            if (from < 0) return;
+            int to = from;
+            for (int i = 0; i < _visual.Count; i++)
             {
-                StepRow row;
-                if (!_rows.TryGetValue(steps[i].Id, out row)) continue;
-                bool isGame = steps[i].Id == "game";
-                bool canUp = i > 0 && !isGame;
-                bool canDown = i < steps.Count - 2 && !isGame;   // the slot just above "game" is the lowest a step can go
-                row.SetMove(canUp, canDown, enabled);
+                var r = _visual[i];
+                if (r == row) continue;
+                if (pt.Y >= r.Top && pt.Y < r.Bottom) { to = i; break; }
             }
+            int gameIdx = _visual.FindIndex(r => r.Step.Id == "game");
+            if (gameIdx >= 0 && to >= gameIdx) to = gameIdx - 1;
+            if (to < 0 || to == from) return;
+            _visual.RemoveAt(from);
+            _visual.Insert(to, row);
+            _stepsCard.SuspendLayout();
+            foreach (var r in _visual) r.BringToFront();   // docked Top: the last one brought to front ends up at the bottom
+            _stepsCard.ResumeLayout();
+        }
+
+        private void OnRowDragEnded(StepRow row)
+        {
+            if (!_engine.SetOrder(_visual.Select(r => r.Step.Id).ToList()))
+                BuildStepRows();   // nothing changed (or engine busy) - snap the rows back to the engine's order
         }
 
         private Control BuildRight()
@@ -1221,7 +1245,7 @@ namespace VRModLoader
                 if (p != EnginePhase.Crashed) _statusGame.Text = "No game running";
             }
             _closeAll.Text = p == EnginePhase.InGame ? "☠  KILL GAME + CLOSE ALL" : "⏏  CLOSE ALL";
-            UpdateMoveButtons();
+            UpdateDragState();
 
             // sleep guard: hold the PC awake while a session runs (never the display - OLED)
             bool wantAwake = _s.SleepGuard && (p == EnginePhase.Launching || p == EnginePhase.InGame || p == EnginePhase.Countdown || p == EnginePhase.ShuttingDown);

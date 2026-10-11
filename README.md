@@ -43,8 +43,8 @@ writes them to `settings.json`, and everything is editable in Settings.
 
 ## Smart waits
 
-Each step has a readiness signal, a timeout (editable in its row) and a global multiplier. Steps can be reordered
-with the ▲▼ buttons on each row (the launch step stays last); the order is saved in `settings.json`.
+Each step has a readiness signal, a timeout (editable in its row) and a global multiplier. Drag a step row to
+reorder the sequence (the launch step stays last); the order is saved in `settings.json`.
 
 | Step | Ready when |
 |---|---|

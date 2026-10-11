@@ -123,18 +123,16 @@ namespace VRModLoader
             foreach (var id in s.StepOrder) Steps.Add(Make(id, names[id], cfgs[id]));
         }
 
-        /// <summary>Move a step up (-1) or down (+1) in the sequence; "game" stays last. Saved to settings.</summary>
-        public bool MoveStep(string id, int delta)
+        /// <summary>Apply a new step order (ids, as dragged in the UI); "game" is pinned last. Saved to settings.</summary>
+        public bool SetOrder(List<string> ids)
         {
             if (IsBusy) return false;
-            int i = Steps.FindIndex(x => x.Id == id);
-            int j = i + delta;
-            if (i < 0 || j < 0 || j >= Steps.Count) return false;
-            if (Steps[i].Id == "game" || Steps[j].Id == "game") return false;
-            var tmp = Steps[i];
-            Steps[i] = Steps[j];
-            Steps[j] = tmp;
-            _s.StepOrder = Steps.Select(x => x.Id).ToList();
+            var order = AppSettings.NormalizeOrder(ids);
+            if (order.SequenceEqual(Steps.Select(x => x.Id))) return false;
+            var byId = Steps.ToDictionary(x => x.Id);
+            Steps.Clear();
+            foreach (var id in order) Steps.Add(byId[id]);
+            _s.StepOrder = order;
             _s.Save(_log);
             _log.Info("SETTINGS", "Step order: " + string.Join(" → ", Steps.Select(x => x.Name)));
             Raise(StepsReordered);
