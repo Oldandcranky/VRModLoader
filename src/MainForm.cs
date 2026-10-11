@@ -83,6 +83,7 @@ namespace VRModLoader
         private readonly Random _rand = new Random();
         private bool _awake;
         private string _alertText;
+        private DateTime _alertAt;
         private Panel _coach;
         private Label _coachTitle, _coachBody;
 
@@ -121,6 +122,7 @@ namespace VRModLoader
                 UpdateLiveView();
                 UpdateOledGuard();
                 if (_guardActive) Invalidate();
+                if (_alertText != null && (DateTime.Now - _alertAt).TotalSeconds > 120) ClearAlert();   // safety net: alerts never stick forever
             };
             _clock.Start();
             Move += delegate { PositionLiveView(); };
@@ -181,7 +183,9 @@ namespace VRModLoader
             {
                 Ui(delegate
                 {
+                    if (msg == null) { ClearAlert(); return; }
                     _alertText = msg.ToUpperInvariant();
+                    _alertAt = DateTime.Now;
                     _phaseColor = Theme.Error;
                     _header.Invalidate();
                     if (_guardActive) ExitGuard("headset alert");
@@ -629,22 +633,25 @@ namespace VRModLoader
             foreach (var row in _rows.Values) { row.CanDrag = enabled; row.RefreshDragState(); }
         }
 
-        /// <summary>Live reorder: the dragged row jumps to whichever row the cursor is over, never below the launch row.</summary>
+        /// <summary>
+        /// Live reorder. The slot comes from where the dragged row's top edge would be (cursor minus grab offset),
+        /// so it only changes when you cross a half-row boundary - no ping-pong when rows reflow under the cursor.
+        /// Never below the launch row.
+        /// </summary>
         private void OnRowDragMoved(StepRow row)
         {
             var pt = _stepsCard.PointToClient(Control.MousePosition);
             int from = _visual.IndexOf(row);
-            if (from < 0) return;
-            int to = from;
-            for (int i = 0; i < _visual.Count; i++)
-            {
-                var r = _visual[i];
-                if (r == row) continue;
-                if (pt.Y >= r.Top && pt.Y < r.Bottom) { to = i; break; }
-            }
+            if (from < 0 || _visual.Count == 0) return;
+            int blockTop = _visual.Min(r => r.Top);
+            int rowH = Math.Max(1, row.Height);
+            int desiredTop = pt.Y - row.GrabOffsetY;
+            int to = (int)Math.Round((desiredTop - blockTop) / (double)rowH);
             int gameIdx = _visual.FindIndex(r => r.Step.Id == "game");
-            if (gameIdx >= 0 && to >= gameIdx) to = gameIdx - 1;
-            if (to < 0 || to == from) return;
+            int maxIdx = gameIdx >= 0 ? gameIdx - 1 : _visual.Count - 1;
+            if (to > maxIdx) to = maxIdx;
+            if (to < 0) to = 0;
+            if (to == from) return;
             _visual.RemoveAt(from);
             _visual.Insert(to, row);
             _stepsCard.SuspendLayout();
@@ -1018,6 +1025,14 @@ namespace VRModLoader
             _liveInfo.Text = "\"" + _live.SourceTitle + "\"  ·  " + _live.SourceSize.Width + "×" + _live.SourceSize.Height + "  ·  PID " + pids[0]
                 + (_engine != null && _engine.InGame ? "  ·  " + _statusGame.Text : "  ·  not started by this launcher");
             PositionLiveView();
+        }
+
+        private void ClearAlert()
+        {
+            if (_alertText == null) return;
+            _alertText = null;
+            if (_engine != null && _engine.InGame) { _phaseColor = Theme.Ok; _phaseText = "IN GAME  " + ProcessUtil.FormatSpan(_played); }
+            _header.Invalidate();
         }
 
         private void ShowCoach(string title, string body)

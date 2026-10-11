@@ -3,6 +3,14 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.2.3 - 2026-10-10
+
+### Fixed
+- Drag-to-reorder no longer ping-pongs: the target slot is computed from where the dragged row would sit, so it only
+  changes when you cross a half-row boundary.
+- Header alerts clear themselves: SteamVR coming back to Ready clears a "lost the headset" alert, and any alert expires
+  after two minutes. A SteamVR Standby while the headset is off (proximity sensor) is logged as normal, not as an alert.
+
 ## 1.2.2 - 2026-10-10
 
 ### Changed

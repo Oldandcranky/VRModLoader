@@ -112,6 +112,8 @@ namespace VRModLoader
         private Point _downAt;
         public bool CanDrag = true;
         public bool Dragging { get { return _dragging; } }
+        /// <summary>Where inside the row (Y, parent coordinates) the mouse grabbed it - keeps the row under the cursor while dragging.</summary>
+        public int GrabOffsetY { get; private set; }
 
         public event Action ConfigChanged;
         /// <summary>Raised while the row is being dragged (read Control.MousePosition for where it is).</summary>
@@ -200,6 +202,7 @@ namespace VRModLoader
             _mouseDown = true;
             _dragging = false;
             _downAt = Control.MousePosition;
+            GrabOffsetY = Parent != null ? Parent.PointToClient(_downAt).Y - Top : Height / 2;
             ((Control)sender).Capture = true;
         }
 

@@ -85,6 +85,10 @@ namespace VRModLoader
         public DateTime LinkDropTime;
         public string SteamVrState = "";
         public int HeadsetBattery = -1;
+        /// <summary>Last proximity-sensor state from Meta's log; Standby while the headset is off is normal, not an alert.</summary>
+        public bool HeadsetOn = true;
+        /// <summary>Special alert value meaning "the earlier alert is resolved - clear it".</summary>
+        public const string ClearAlert = "<clear>";
 
         /// <summary>Headset/runtime problems noticed since the last call (for tray balloons).</summary>
         public List<string> TakeAlerts()
@@ -181,7 +185,8 @@ namespace VRModLoader
             if (ln.IndexOf("Proximity sensor toggled:", StringComparison.Ordinal) >= 0)
             {
                 _log.Game("META", ln);
-                _log.Info("LINK", ln.IndexOf("toggled: on", StringComparison.Ordinal) >= 0 ? "Headset put on" : "Headset taken off");
+                HeadsetOn = ln.IndexOf("toggled: on", StringComparison.Ordinal) >= 0;
+                _log.Info("LINK", HeadsetOn ? "Headset put on" : "Headset taken off");
                 return;
             }
             if (ln.IndexOf("USB device connected, pid:0x5010", StringComparison.Ordinal) >= 0)
@@ -206,8 +211,16 @@ namespace VRModLoader
                 string to = Between(ln, "to 'SteamVRSystemState_", "'");
                 SteamVrState = to;
                 _log.Game("VRMON", ln);
-                if (to == "Standby") { _log.Warn("STEAMVR", "SteamVR went to Standby - it lost the headset"); _alerts.Add("SteamVR lost the headset (Standby)"); }
-                else if (to == "Ready") _log.Info("STEAMVR", "SteamVR is Ready" + (from == "Standby" ? " - headset is back" : ""));
+                if (to == "Standby")
+                {
+                    if (HeadsetOn) { _log.Warn("STEAMVR", "SteamVR went to Standby while the headset is on - it lost the headset"); _alerts.Add("SteamVR lost the headset (Standby)"); }
+                    else _log.Info("STEAMVR", "SteamVR idle (Standby) - the headset is off, this is normal");
+                }
+                else if (to == "Ready")
+                {
+                    _log.Info("STEAMVR", "SteamVR is Ready" + (from == "Standby" ? " - headset is back" : ""));
+                    if (from == "Standby") _alerts.Add(ClearAlert);
+                }
                 else _log.Info("STEAMVR", "SteamVR state: " + from + " → " + to);
                 return;
             }

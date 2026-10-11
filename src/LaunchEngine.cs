@@ -1124,7 +1124,8 @@ namespace VRModLoader
                     if (watcher != null)
                     {
                         watcher.Poll();
-                        foreach (var a in watcher.TakeAlerts()) Raise(Alert, "Headset", a);
+                        foreach (var a in watcher.TakeAlerts())
+                            Raise(Alert, "Headset", a == GameLogWatcher.ClearAlert ? null : a);   // null = resolved, clear the banner
                     }
 
                     tick++;
