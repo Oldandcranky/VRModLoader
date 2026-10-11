@@ -37,6 +37,7 @@ namespace VRModLoader
         public StepConfig StepBackup { get; set; }
         public StepConfig StepKillOverlays { get; set; }
         public StepConfig StepMetaHorizon { get; set; }
+        public StepConfig StepHeadsetLink { get; set; }
         public StepConfig StepSteamVr { get; set; }
         public StepConfig StepEa { get; set; }
         public StepConfig StepCircuitLord { get; set; }
@@ -87,16 +88,20 @@ namespace VRModLoader
 
         public AppSettings()
         {
-            GamePath = @"D:\SteamLibrary\steamapps\common\Titanfall2";
-            MetaHorizonExe = @"C:\Program Files\Meta Horizon\Support\oculus-client\OculusClient.exe";
-            EaDesktopExe = @"C:\Program Files\Electronic Arts\EA Desktop\EA Desktop\EADesktop.exe";
-            CircuitLordExe = @"C:\Users\Sam\Downloads\CircuitLordVRModInstaller.exe";
+            // Paths are auto-detected (CircuitLord's installer settings, registry, Steam libraries, default folders);
+            // whatever is found is written to settings.json on first run and can be changed in Settings.
+            string how;
+            GamePath = Detect.GamePath(out how);
+            MetaHorizonExe = Detect.MetaHorizonExe(out how);
+            EaDesktopExe = Detect.EaDesktopExe(out how);
+            CircuitLordExe = Detect.CircuitLordExe(out how);
             SteamVrUri = "steam://run/250820";
 
             TimeoutMultiplier = 1.0;
             StepBackup = new StepConfig(true, 30, 0);
             StepKillOverlays = new StepConfig(true, 10, 0);
             StepMetaHorizon = new StepConfig(true, 45, 2);
+            StepHeadsetLink = new StepConfig(true, 180, 3);
             StepSteamVr = new StepConfig(true, 60, 3);
             StepEa = new StepConfig(true, 45, 2);
             StepCircuitLord = new StepConfig(false, 20, 0);
@@ -143,9 +148,10 @@ namespace VRModLoader
             string path = FilePath;
             if (!File.Exists(path))
             {
-                log.Info("SETTINGS", "No settings.json yet - using defaults (" + path + ")");
+                log.Info("SETTINGS", "No settings.json yet - detecting paths:\r\n" + Detect.Summary(null));
                 var fresh = new AppSettings();
                 fresh.Save(log);
+                log.Info("SETTINGS", "Defaults written to " + path);
                 return fresh;
             }
             try
@@ -154,6 +160,7 @@ namespace VRModLoader
                 var s = Json.Deserialize<AppSettings>(json);
                 if (s == null) throw new InvalidDataException("settings.json parsed to null");
                 s.Normalize();
+                s.RedetectMissing(log);
                 log.Ok("SETTINGS", "Loaded " + path + " (" + json.Length + " bytes)");
                 return s;
             }
@@ -170,6 +177,7 @@ namespace VRModLoader
             if (StepBackup == null) StepBackup = new StepConfig(true, 30, 0);
             if (StepKillOverlays == null) StepKillOverlays = new StepConfig(true, 10, 0);
             if (StepMetaHorizon == null) StepMetaHorizon = new StepConfig(true, 45, 2);
+            if (StepHeadsetLink == null) StepHeadsetLink = new StepConfig(true, 180, 3);
             if (StepSteamVr == null) StepSteamVr = new StepConfig(true, 60, 3);
             if (StepEa == null) StepEa = new StepConfig(true, 45, 2);
             if (StepCircuitLord == null) StepCircuitLord = new StepConfig(false, 20, 0);
@@ -183,6 +191,34 @@ namespace VRModLoader
             if (OledGuardSeconds < 0) OledGuardSeconds = 0;
             if (OledGuardSeconds > 0 && OledGuardSeconds < 10) OledGuardSeconds = 10;
             if (string.IsNullOrEmpty(SteamVrUri)) SteamVrUri = "steam://run/250820";
+        }
+
+        /// <summary>A saved path that no longer exists (game moved, app updated) is re-detected rather than left broken.</summary>
+        private void RedetectMissing(Logger log)
+        {
+            bool changed = false;
+            string how;
+            if (!Detect.IsGameDir(GamePath))
+            {
+                string g = Detect.GamePath(out how);
+                if (g.Length > 0) { log.Info("SETTINGS", "Game folder '" + GamePath + "' is gone - re-detected " + g + " [" + how + "]"); GamePath = g; changed = true; }
+            }
+            if (string.IsNullOrEmpty(MetaHorizonExe) || !File.Exists(MetaHorizonExe))
+            {
+                string m = Detect.MetaHorizonExe(out how);
+                if (m.Length > 0) { log.Info("SETTINGS", "Meta Horizon path re-detected: " + m + " [" + how + "]"); MetaHorizonExe = m; changed = true; }
+            }
+            if (string.IsNullOrEmpty(EaDesktopExe) || !File.Exists(EaDesktopExe))
+            {
+                string e = Detect.EaDesktopExe(out how);
+                if (e.Length > 0) { log.Info("SETTINGS", "EA app path re-detected: " + e + " [" + how + "]"); EaDesktopExe = e; changed = true; }
+            }
+            if (string.IsNullOrEmpty(CircuitLordExe) || !File.Exists(CircuitLordExe))
+            {
+                string c = Detect.CircuitLordExe(out how);
+                if (c.Length > 0) { log.Info("SETTINGS", "CircuitLord launcher re-detected: " + c + " [" + how + "]"); CircuitLordExe = c; changed = true; }
+            }
+            if (changed) Save(log);
         }
 
         public void Save(Logger log)

@@ -3,6 +3,26 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.2.0 - 2026-10-10
+
+### Added
+- **Headset Link step** (between Meta Horizon and SteamVR). The PC can tell a Quest that is merely plugged in
+  (USB `VID_2833&PID_5011`) from one that is streaming over Link (`PID_5010`, or `OculusDash.exe` running - also
+  Air Link). The step waits for Link and coaches whoever holds the headset with a big on-screen banner: plug the
+  cable in / wake the headset, then "tap Allow on the Link prompt, or Quick Settings → Link → <this PC>". It asks
+  Meta to raise the Link prompt (any VR app registering with the service makes it call `launchLink()`; the mod's
+  `xr_probe` does the job) and the timeout dialog has a **Nudge** button that asks again and re-plugs the USB
+  device (`pnputil /restart-device`, one UAC click).
+- Pre-flight shows the headset's USB state; the in-game watch logs "headset put on / taken off" and the switch into
+  Link mode.
+
+### Changed
+- Paths are **auto-detected** instead of hard-coded: the game folder from CircuitLord's installer settings, the
+  Respawn registry key, every Steam library, default EA/Origin folders or a drive scan; the Meta Horizon client from
+  its registry base / Program Files; the EA app from the Origin `ClientPath` key; CircuitLord's exe from Downloads,
+  Desktop, Documents and friends (or a running instance). A saved path that stops existing is re-detected on start,
+  and Settings has an "Auto-detect the four paths again" link.
+
 ## 1.1.0 - 2026-10-10
 
 ### Added

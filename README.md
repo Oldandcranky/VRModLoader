@@ -19,8 +19,14 @@ Nothing to install - it uses the C# compiler that ships with Windows (.NET Frame
 powershell -ExecutionPolicy Bypass -File .\build.ps1 -Run
 ```
 
-That produces `VRModLoader.exe` next to this file plus a desktop shortcut. `-RebuildIcon` redraws `assets\app.ico`.
-Start it with `--windowed` to skip focus mode for one run.
+That produces `VRModLoader.exe` next to this file plus a desktop shortcut. `-RebuildIcon` redraws `assets\app.ico`,
+`-Bump patch|minor|major` increments the `VERSION` file before building. Start the exe with `--windowed` to skip
+focus mode for one run.
+
+Or skip the build: grab the exe from the [latest release](https://github.com/Oldandcranky/VRModLoader/releases),
+drop it in a folder of its own and run it. On first run it detects the game folder (CircuitLord's installer settings,
+registry, Steam libraries, default EA folders, drive scan), the Meta Horizon client, the EA app and CircuitLord's exe,
+writes them to `settings.json`, and everything is editable in Settings.
 
 ## Layout
 
@@ -43,6 +49,7 @@ Each step has a readiness signal, a timeout (editable in its row) and a global m
 |---|---|
 | Kill overlays | none of the kill-list processes remain |
 | Meta Horizon | `OVRServer_x64` **and** the Meta client (`Client.exe` under `Meta Horizon\Support\oculus-client`; `OculusClient.exe` is only a 0-byte alias) |
+| Headset Link | the Quest is streaming: USB `VID_2833&PID_5010` (it re-enumerates from `PID_5011` when Link starts) **or** `OculusDash.exe` running (also Air Link). While waiting, a banner tells the person holding the headset what to do, and Meta is nudged to raise the "Enable Link" prompt. |
 | SteamVR | `vrserver`, `vrmonitor` **and** `vrcompositor` (the compositor only appears once SteamVR sees the headset) |
 | EA app | `EADesktop` |
 | Headset probe | the mod's own `TF2VR\tools\xr_probe.exe --inventory` reports no `XR_ERROR_*` - OpenXR can see the headset. Retries every 3 s. |

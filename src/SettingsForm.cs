@@ -52,6 +52,27 @@ namespace VRModLoader
             _ea = PathRow(grid, "EA app", s.EaDesktopExe, false);
             _cl = PathRow(grid, "CircuitLord launcher", s.CircuitLordExe, false);
             _uri = TextRow(grid, "SteamVR launch URI", s.SteamVrUri);
+            var detect = Theme.Link("Auto-detect the four paths again");
+            detect.Margin = Theme.Pad(0, 0, 0, 4);
+            detect.Click += delegate
+            {
+                string h1, h2, h3, h4;
+                string g = Detect.GamePath(out h1), m = Detect.MetaHorizonExe(out h2), e = Detect.EaDesktopExe(out h3), c = Detect.CircuitLordExe(out h4);
+                if (g.Length > 0) _game.Text = g;
+                if (m.Length > 0) _meta.Text = m;
+                if (e.Length > 0) _ea.Text = e;
+                if (c.Length > 0) _cl.Text = c;
+                _log.Info("SETTINGS", "Auto-detect from the Settings dialog:\r\n" + Detect.Summary(_s));
+                DarkDialog.Show(this, "Auto-detect",
+                    "Game folder: " + (g.Length > 0 ? g + "  [" + h1 + "]" : "not found") + "\n"
+                    + "Meta Horizon: " + (m.Length > 0 ? m + "  [" + h2 + "]" : "not found") + "\n"
+                    + "EA app: " + (e.Length > 0 ? e + "  [" + h3 + "]" : "not found") + "\n"
+                    + "CircuitLord: " + (c.Length > 0 ? c + "  [" + h4 + "]" : "not found") + "\n\nFields were filled with what was found; Save keeps them.",
+                    new[] { "OK" }, 0);
+            };
+            grid.Controls.Add(detect, 1, grid.RowCount);
+            grid.SetColumnSpan(detect, 2);
+            grid.RowCount++;
 
             Section(grid, "Overlays");
             _kill = TextRow(grid, "Kill before launch", string.Join(", ", s.KillProcesses ?? new List<string>()));

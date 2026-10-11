@@ -103,6 +103,12 @@ namespace VRModLoader
                     + (client.Length > 0 ? " · client running (PIDs " + ProcessUtil.PidList(client) + ")" : " · client not running"));
             }
 
+            var quest = Headset.Usb();
+            bool dash = Headset.DashRunning();
+            Add(r, log, "Headset (USB)", quest.State == UsbState.None && !dash ? CheckStatus.Warn : CheckStatus.Ok,
+                Headset.Describe(quest) + (dash ? " · Link active (OculusDash running)" : "")
+                + (quest.State == UsbState.None && !dash ? " - plug the Link cable in; the Headset Link step waits for it" : ""));
+
             bool steam = ProcessUtil.IsRunning("steam");
             Add(r, log, "Steam", steam ? CheckStatus.Ok : CheckStatus.Warn,
                 steam ? "running " + ProcessUtil.DescribeRunning(new[] { "steam" }) : "not running - the SteamVR step will have to start Steam first (slower)");

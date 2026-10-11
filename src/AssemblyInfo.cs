@@ -5,6 +5,6 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyTitle("VR Mod Loader")]
 [assembly: AssemblyDescription("One-click launcher and session dashboard for Titanfall 2 VR: starts the VR stack in order with smart waits, kills overlays, backs up saves, launches the mod directly, watches the game and the headset link, and tears everything down afterwards.")]
 [assembly: AssemblyProduct("VR Mod Loader")]
-[assembly: AssemblyCompany("Sam")]
+[assembly: AssemblyCompany("Oldandcranky")]
 [assembly: AssemblyCopyright("2026")]
 [assembly: ComVisible(false)]

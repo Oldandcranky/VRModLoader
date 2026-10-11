@@ -83,6 +83,8 @@ namespace VRModLoader
         private readonly Random _rand = new Random();
         private bool _awake;
         private string _alertText;
+        private Panel _coach;
+        private Label _coachTitle, _coachBody;
 
         private static int S(int px) { return Theme.S(px); }
 
@@ -173,6 +175,7 @@ namespace VRModLoader
             _engine.GameDetected += delegate { Ui(delegate { OnGameDetected(); }); };
             _live = new LiveView(this);
             _engine.FocusRequested += delegate { Ui(delegate { if (_fullscreen && !_inTray) WindowUtil.ForceForeground(Handle); }); };
+            _engine.Coach += delegate(string title, string body) { Ui(delegate { ShowCoach(title, body); }); };
             _engine.Alert += delegate(string title, string msg)
             {
                 Ui(delegate
@@ -643,6 +646,23 @@ namespace VRModLoader
             host.Controls.Add(_paneLive);
             host.Controls.Add(tabs);
 
+            // coaching banner for whoever is holding the headset - docks above the tabs when visible
+            _coach = new Panel();
+            _coach.Dock = DockStyle.Top;
+            _coach.BackColor = ColorTranslator.FromHtml("#2A2410");
+            _coach.Padding = Theme.Pad(16, 12, 16, 14);
+            _coach.Visible = false;
+            _coach.AutoSize = true;
+            _coach.Paint += delegate(object s, PaintEventArgs e) { using (var pen = new Pen(Theme.Warn, 2f)) e.Graphics.DrawRectangle(pen, 1, 1, _coach.Width - 3, _coach.Height - 3); };
+            _coachTitle = Theme.Label("", Theme.Warn, Theme.Title);
+            _coachTitle.Dock = DockStyle.Top;
+            _coachBody = Theme.Label("", Theme.Text, Theme.Big);
+            _coachBody.Dock = DockStyle.Top;
+            _coachBody.Padding = Theme.Pad(0, 8, 0, 0);
+            _coach.Controls.Add(_coachBody);
+            _coach.Controls.Add(_coachTitle);
+            host.Controls.Add(_coach);
+
             _tabLauncher.Click += delegate { SelectTab(0); };
             _tabGame.Click += delegate { SelectTab(1); };
             _tabSessions.Click += delegate { SelectTab(2); };
@@ -951,6 +971,19 @@ namespace VRModLoader
             _liveInfo.Text = "\"" + _live.SourceTitle + "\"  ·  " + _live.SourceSize.Width + "×" + _live.SourceSize.Height + "  ·  PID " + pids[0]
                 + (_engine != null && _engine.InGame ? "  ·  " + _statusGame.Text : "  ·  not started by this launcher");
             PositionLiveView();
+        }
+
+        private void ShowCoach(string title, string body)
+        {
+            if (string.IsNullOrEmpty(title)) { _coach.Visible = false; return; }
+            _coachTitle.Text = title;
+            _coachBody.MaximumSize = new Size(Math.Max(S(300), _coach.Width - S(40)), 0);
+            _coachBody.Text = body ?? "";
+            _coach.Visible = true;
+            _coach.BringToFront();
+            if (_guardActive) ExitGuard("coaching");
+            if (_inTray) ShowFromTray();
+            if (_fullscreen) WindowUtil.ForceForeground(Handle);
         }
 
         private void OnGameDetected()

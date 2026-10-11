@@ -178,6 +178,18 @@ namespace VRModLoader
                 }
                 return;
             }
+            if (ln.IndexOf("Proximity sensor toggled:", StringComparison.Ordinal) >= 0)
+            {
+                _log.Game("META", ln);
+                _log.Info("LINK", ln.IndexOf("toggled: on", StringComparison.Ordinal) >= 0 ? "Headset put on" : "Headset taken off");
+                return;
+            }
+            if (ln.IndexOf("USB device connected, pid:0x5010", StringComparison.Ordinal) >= 0)
+            {
+                _log.Game("META", ln);
+                _log.Info("LINK", "Headset switched to Link mode over USB");
+                return;
+            }
             if (ln.IndexOf("{!ERROR!}", StringComparison.Ordinal) >= 0
                 && ln.IndexOf("OVR Error:", StringComparison.Ordinal) < 0
                 && ln.IndexOf("OculusVadPeriodicCaptureStatsPayloadRecord", StringComparison.Ordinal) < 0)
