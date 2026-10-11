@@ -71,6 +71,8 @@ namespace VRModLoader
         public bool ShowModuleLoads { get; set; }
         public bool ShowDebug { get; set; }
         public bool DirectLaunch { get; set; }
+        /// <summary>On start, check CircuitLord's GitHub manifest for Titanfall 2 VR mod and installer updates.</summary>
+        public bool CheckModUpdates { get; set; }
 
         // ---- focus mode ------------------------------------------------------------------------
         /// <summary>On start: minimize everything else (Win+D) and go borderless fullscreen.</summary>
@@ -133,6 +135,7 @@ namespace VRModLoader
             ShowModuleLoads = false;
             ShowDebug = true;
             DirectLaunch = true;
+            CheckModUpdates = true;
 
             FocusMode = true;
             MinimizeLaunchedApps = true;

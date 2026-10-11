@@ -18,6 +18,7 @@ namespace VRModLoader
         private CheckBox _liveView, _dashboard, _sleep;
         private NumericUpDown _oled;
         private CheckBox _tAuto, _tCable, _tAir;
+        private CheckBox _modCheck;
         private NumericUpDown _keep, _countdown, _threshold;
 
         public SettingsForm(AppSettings s, Logger log)
@@ -82,6 +83,7 @@ namespace VRModLoader
 
             Section(grid, "Launch");
             _direct = CheckRowCtl(grid, "Direct launch (replicates CircuitLord's \"Launch in VR\"; off = always open CircuitLord's window)", s.DirectLaunch);
+            _modCheck = CheckRowCtl(grid, "On start, check CircuitLord's GitHub for Titanfall 2 VR mod and installer updates", s.CheckModUpdates);
             var tRow = Flow();
             tRow.Controls.Add(FlowLabel("Headset connects via:"));
             _tAuto = Theme.Check("Auto (either)", s.LinkTransport != "cable" && s.LinkTransport != "air");
@@ -307,6 +309,7 @@ namespace VRModLoader
             _s.KillProcesses = _kill.Text.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(ProcessUtil.Clean).Where(x => x.Length > 0).ToList();
             _s.RestartDiscordAfter = _restartDiscord.Checked;
             _s.DirectLaunch = _direct.Checked;
+            _s.CheckModUpdates = _modCheck.Checked;
             _s.LinkTransport = _tCable.Checked ? "cable" : _tAir.Checked ? "air" : "auto";
             _s.BackupKeep = (int)_keep.Value;
             _s.BackupSkipVideos = _skipVideos.Checked;

@@ -3,6 +3,24 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.5.0 - 2026-10-11
+
+### Added
+- **Titanfall 2 VR mod updates.** On start the launcher reads CircuitLord's own release manifest
+  (`manifest-v3.json` in his installer repo - the file his installer uses) and compares it with your install record
+  and installer exe. Pre-flight shows "Titanfall2VR 1.0.17 is current" or "1.0.18 available", and when something is
+  newer a **MOD UPDATE** badge appears in the header with a tray notification. The beta channel is followed if that is
+  what you have installed.
+- **One-click mod update hand-off.** The badge refreshes CircuitLord's installer first when a newer one is published
+  (downloaded from his release link and checked against the SHA-256 in his manifest; a mismatch is refused) and then
+  opens it so its own **Update** button does the mod update - it keeps calibration files and removes obsolete ones.
+  When the installer closes, the launcher checks again. Updates are refused while the game is running.
+- Settings → Launch: "On start, check CircuitLord's GitHub for Titanfall 2 VR mod and installer updates".
+
+### Changed
+- The SteamVR refresh rate snaps to the standard headset rate it is near (a 60-frame sample read 70 Hz on a 72 Hz
+  Quest), so the frame budget is exact.
+
 ## 1.4.1 - 2026-10-11
 
 ### Fixed

@@ -21,12 +21,12 @@ namespace VRModLoader
 
         public Updater(Logger log) { _log = log; }
 
-        private static void EnableTls12()
+        internal static void EnableTls12()
         {
             try { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072; } catch { }   // TLS 1.2 on .NET 4.x
         }
 
-        private static string Get(string url, int timeoutMs)
+        internal static string Get(string url, int timeoutMs)
         {
             EnableTls12();
             var req = (HttpWebRequest)WebRequest.Create(url);

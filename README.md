@@ -95,6 +95,9 @@ opening CircuitLord's window.
   keeping your settings, logs, backups and history.
 - **LAUNCH / ATTACH**: the big button reads ATTACH TO RUNNING GAME whenever Titanfall 2 VR is already up, and glows
   while it is the thing to press.
+- **Mod updates**: on start the launcher reads CircuitLord's release manifest and tells you (pre-flight, a
+  **MOD UPDATE** badge, a tray notification) when a newer Titanfall 2 VR mod or installer is out. The badge refreshes
+  his installer (SHA-256 checked against his manifest) and opens it so its own Update button installs the mod.
 
 ## Focus mode
 

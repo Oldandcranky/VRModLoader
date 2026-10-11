@@ -62,6 +62,14 @@ namespace VRModLoader
                           + (string.IsNullOrEmpty(rec.channel) ? "" : " · channel " + rec.channel)
                           + " · " + (rec.files == null ? 0 : rec.files.Count) + " tracked files");
 
+                if (!s.CheckModUpdates) Add(r, log, "Mod updates", CheckStatus.Info, "not checked (turned off in Settings)");
+                else
+                {
+                    var mu = ModUpdates.Last;
+                    if (mu == null) Add(r, log, "Mod updates", CheckStatus.Info, "checking CircuitLord's GitHub…");
+                    else Add(r, log, "Mod updates", !mu.Ok ? CheckStatus.Info : mu.AnyUpdate ? CheckStatus.Warn : CheckStatus.Ok, mu.Summary);
+                }
+
                 try
                 {
                     var spec = GameInfo.ReadLaunchSpec(gp);

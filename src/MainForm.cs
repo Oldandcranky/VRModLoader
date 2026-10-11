@@ -91,6 +91,10 @@ namespace VRModLoader
         private Updater _updater;
         private string _updateVersion, _updateUrl;
         private Button _updateBtn;
+        private Button _modBtn;
+        private ModUpdateInfo _modInfo;
+        private List<CheckResult> _lastChecks;
+        private bool _headerBadgeHooked;
         private TimeSpan _played;
         private bool _guardActive;
         private bool _guardForcedFs;
@@ -240,6 +244,7 @@ namespace VRModLoader
                 }
                 catch { }
             });
+            StartModUpdateCheck();
 
             BuildStepRows();
             _multiplier.Value = (decimal)_s.TimeoutMultiplier;
@@ -350,12 +355,165 @@ namespace VRModLoader
             if (_tray != null) _tray.ShowBalloonTip(6000, "Update available", "VR Mod Loader " + version + " is ready - click UPDATE in the header.", ToolTipIcon.Info);
         }
 
+        /// <summary>Header badges, right to left just before the phase pill: [MOD UPDATE] [UPDATE TO x.y.z].</summary>
         private void PlaceUpdateButton()
         {
-            if (_updateBtn == null) return;
-            // just left of the phase pill
             int right = _header.Width - Math.Max(S(18), _pillInset + S(10)) - S(210);
-            _updateBtn.Location = new Point(Math.Max(S(560), right - _updateBtn.Width), (_header.Height - _updateBtn.Height) / 2);
+            if (_updateBtn != null && _updateBtn.Visible)
+            {
+                _updateBtn.Location = new Point(Math.Max(S(560), right - _updateBtn.Width), (_header.Height - _updateBtn.Height) / 2);
+                right = _updateBtn.Left - S(8);
+            }
+            if (_modBtn != null && _modBtn.Visible)
+                _modBtn.Location = new Point(Math.Max(S(560), right - _modBtn.Width), (_header.Height - _modBtn.Height) / 2);
+        }
+
+        // =====================================================================================
+        // CircuitLord mod / installer updates
+        // =====================================================================================
+
+        private void StartModUpdateCheck()
+        {
+            if (_s == null || !_s.CheckModUpdates) return;
+            var s = _s;
+            System.Threading.Tasks.Task.Factory.StartNew(delegate
+            {
+                var info = ModUpdates.Check(s, _log);
+                Ui(delegate { OnModUpdateChecked(info); });
+            });
+        }
+
+        private void OnModUpdateChecked(ModUpdateInfo info)
+        {
+            _modInfo = info;
+            // refresh the pre-flight row in place (pre-flight usually finishes before GitHub answers)
+            if (_lastChecks != null)
+            {
+                var row = _lastChecks.FirstOrDefault(c => c.Name == "Mod updates");
+                if (row != null)
+                {
+                    row.Status = !info.Ok ? CheckStatus.Info : info.AnyUpdate ? CheckStatus.Warn : CheckStatus.Ok;
+                    row.Detail = info.Summary;
+                    ShowChecks(_lastChecks);
+                }
+            }
+            if (!info.AnyUpdate)
+            {
+                if (_modBtn != null) { _modBtn.Visible = false; PlaceUpdateButton(); }
+                return;
+            }
+
+            string label = info.ModNewer ? "⬆  MOD UPDATE " + info.LatestMod : "⬆  INSTALLER " + info.LatestInstaller;
+            if (_modBtn == null)
+            {
+                _modBtn = Theme.Button(label, false);
+                _modBtn.AutoSize = true;
+                _modBtn.Height = S(30);
+                _modBtn.Padding = Theme.Pad(10, 0, 10, 0);
+                _modBtn.ForeColor = Theme.Warn;
+                _modBtn.FlatAppearance.BorderColor = Theme.Warn;
+                _modBtn.BackColor = Color.Transparent;
+                _modBtn.TabStop = false;
+                _modBtn.Click += delegate { DoModUpdate(); };
+                _header.Controls.Add(_modBtn);
+            }
+            _modBtn.Text = label;
+            _modBtn.Visible = true;
+            new ToolTip().SetToolTip(_modBtn, info.Summary);
+            if (!_headerBadgeHooked) { _headerBadgeHooked = true; _header.Resize += delegate { PlaceUpdateButton(); }; }
+            PlaceUpdateButton();
+            if (_tray != null)
+                _tray.ShowBalloonTip(7000, info.ModNewer ? "Titanfall 2 VR mod update" : "CircuitLord installer update",
+                    info.Summary + " - click MOD UPDATE in the header.", ToolTipIcon.Info);
+        }
+
+        /// <summary>
+        /// Refresh CircuitLord's installer if needed (SHA-256 checked), then open it so its own Update button does the
+        /// mod update - it keeps calibration files and removes obsolete ones. Re-checks when the installer closes.
+        /// </summary>
+        private void DoModUpdate()
+        {
+            var info = _modInfo;
+            if (info == null || !info.AnyUpdate) return;
+            if ((_engine != null && _engine.IsBusy) || ProcessUtil.Present(GameInfo.GameProcessNames).Length > 0)
+            {
+                DarkDialog.Show(this, "Update after the session", "Titanfall 2 VR is running. Update the mod once the session is over - the game files cannot change while it runs.", new[] { "OK" }, 0);
+                return;
+            }
+            string exe = _s.CircuitLordExe;
+            if (string.IsNullOrEmpty(exe) || (!File.Exists(exe) && !info.InstallerNewer))
+            {
+                DarkDialog.Show(this, "CircuitLord installer not found", "The launcher does not know where CircuitLord's installer is.\nSet it in Settings → Paths (or use Auto-detect there).", new[] { "OK" }, 0);
+                return;
+            }
+
+            string msg = (info.ModNewer ? "Titanfall 2 VR " + info.LatestMod + " is out (you have " + info.InstalledMod + ").\n\n" : "")
+                + (info.InstallerNewer ? "CircuitLord's installer " + info.LatestInstaller + " is out (you have " + info.InstalledInstaller + ") - the launcher downloads it first and checks it against CircuitLord's published checksum.\n\n" : "")
+                + (info.ModNewer ? "CircuitLord's installer opens next: click Update next to Titanfall 2 VR. It keeps your calibration files and removes old ones; your saves are not touched (and the launcher backs them up before every session anyway)."
+                                 : "The installer opens afterwards so you can check it.");
+            if (DarkDialog.Show(this, info.ModNewer ? "Update Titanfall 2 VR" : "Update CircuitLord's installer", msg, new[] { info.ModNewer ? "Update" : "Update installer", "Later" }, 0) != 0) return;
+
+            _modBtn.Enabled = false;
+            _modBtn.Text = info.InstallerNewer ? "UPDATING INSTALLER…" : "OPENING INSTALLER…";
+            System.Threading.Tasks.Task.Factory.StartNew(delegate
+            {
+                string err = null;
+                if (info.InstallerNewer) ModUpdates.RefreshInstaller(info, exe, _log, out err);
+                Ui(delegate
+                {
+                    _modBtn.Enabled = true;
+                    if (err != null)
+                    {
+                        _modBtn.Text = "⬆  INSTALLER " + info.LatestInstaller;
+                        int a = DarkDialog.Show(this, "Installer update failed", err + (File.Exists(exe) ? "\n\nOpen the installer you already have instead? It can update itself." : ""),
+                            File.Exists(exe) ? new[] { "Open it", "Cancel" } : new[] { "OK" }, 0);
+                        if (!File.Exists(exe) || a != 0) return;
+                    }
+                    OpenInstallerForUpdate(exe);
+                });
+            });
+        }
+
+        private void OpenInstallerForUpdate(string exe)
+        {
+            try
+            {
+                var running = ProcessUtil.ByName("CircuitLordVRModInstaller");
+                Process p = null;
+                if (running.Length > 0)
+                {
+                    p = running[0];
+                    if (p.MainWindowHandle != IntPtr.Zero) WindowUtil.ForceForeground(p.MainWindowHandle);
+                    _log.Info("MODUPDATE", "CircuitLord's installer is already open (PID " + p.Id + ")");
+                }
+                else
+                {
+                    var psi = new ProcessStartInfo(exe);
+                    psi.UseShellExecute = true;
+                    psi.WorkingDirectory = Path.GetDirectoryName(exe);
+                    p = Process.Start(psi);
+                    _log.Info("MODUPDATE", "Opened CircuitLord's installer for the update" + (p != null ? " (PID " + p.Id + ")" : ""));
+                }
+                if (_modBtn != null) _modBtn.Text = "WAITING FOR INSTALLER…";
+                // when the installer closes, check again so the badge and pre-flight reflect the new version
+                var watch = p;
+                System.Threading.Tasks.Task.Factory.StartNew(delegate
+                {
+                    try { if (watch != null) watch.WaitForExit(); } catch { }
+                    var info = ModUpdates.Check(_s, _log);
+                    Ui(delegate
+                    {
+                        OnModUpdateChecked(info);
+                        if (!info.AnyUpdate) _log.Ok("MODUPDATE", "Everything is current after the update: " + info.Summary);
+                        UpdateModLabel();
+                    });
+                });
+            }
+            catch (Exception ex)
+            {
+                _log.Exception("MODUPDATE", "Could not open CircuitLord's installer", ex);
+                DarkDialog.Show(this, "Could not open the installer", ex.Message, new[] { "OK" }, 0);
+            }
         }
 
         private void DoUpdate(string notes)
@@ -1646,6 +1804,7 @@ namespace VRModLoader
 
         private void ShowChecks(List<CheckResult> list)
         {
+            _lastChecks = list;
             _checkList.SuspendLayout();
             _checkList.Controls.Clear();
             _checkList.AutoScrollPosition = Point.Empty;

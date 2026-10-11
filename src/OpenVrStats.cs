@@ -310,7 +310,7 @@ namespace VRModLoader
                 if (_getFrameTiming(ref old, 60) && t.frameIndex > old.frameIndex && t.systemTime > old.systemTime)
                 {
                     double hz = (t.frameIndex - old.frameIndex) / (t.systemTime - old.systemTime);
-                    if (hz >= 50 && hz <= 250) _refreshHz = (float)(Math.Abs(hz - Math.Round(hz)) < 0.6 ? Math.Round(hz) : Math.Round(hz, 1));
+                    if (hz >= 50 && hz <= 250) _refreshHz = SnapHz(hz);
                 }
             }
 
@@ -335,6 +335,14 @@ namespace VRModLoader
                     + ", max " + s.GpuMaxMs.ToString("0.0", CultureInfo.InvariantCulture) + "), " + dropped + " dropped, " + reproj + " reprojected ("
                     + s.ReprojPct.ToString("0.0", CultureInfo.InvariantCulture) + "%) of " + presents + " presents"
                     + (_refreshHz > 0 ? ", " + _refreshHz.ToString("0.#", CultureInfo.InvariantCulture) + " Hz" : ""));
+        }
+
+        /// <summary>A 60-frame timestamp sample wobbles a couple of Hz; snap to the standard headset rate it is near.</summary>
+        private static float SnapHz(double hz)
+        {
+            double[] rates = { 60, 72, 80, 90, 120, 144 };
+            foreach (var r in rates) if (Math.Abs(hz - r) <= 3.0) return (float)r;
+            return (float)Math.Round(hz);
         }
 
         [HandleProcessCorruptedStateExceptions, SecurityCritical]
