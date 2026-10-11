@@ -82,6 +82,11 @@ namespace VRModLoader
         private LinkQualityPanel _linkPanel;
         private TimeSpan _played;
         private bool _guardActive;
+        private bool _guardForcedFs;
+        private FormBorderStyle _guardPrevBorder;
+        private FormWindowState _guardPrevState;
+        private Rectangle _guardPrevBounds;
+        private FormWindowState _prevWindowState = FormWindowState.Normal;
         private Point _guardTextPos;
         private Rectangle _guardThumb;
         private DateTime _guardLastDrift;
@@ -135,7 +140,13 @@ namespace VRModLoader
             Load += OnLoad;
             Shown += OnShown;
             FormClosing += OnClosing;
-            Resize += delegate { if (WindowState == FormWindowState.Minimized && _s != null && _s.MinimizeToTray && _engine != null && _engine.InGame) HideToTray(false); };
+            Resize += delegate
+            {
+                var ws = WindowState;
+                if (ws == FormWindowState.Minimized && _s != null && _s.MinimizeToTray && _engine != null && _engine.InGame) HideToTray(false);
+                else if (_prevWindowState == FormWindowState.Minimized && ws != FormWindowState.Minimized) ReacquireLiveViews("restored from minimized");
+                _prevWindowState = ws;
+            };
             KeyDown += delegate(object s, KeyEventArgs e)
             {
                 if (e.KeyCode == Keys.F5 && _launch.Enabled) { e.Handled = true; _launch.PerformClick(); }
@@ -1081,6 +1092,19 @@ namespace VRModLoader
             if (_vrmonBmp != null) { _vrmonBmp.Dispose(); _vrmonBmp = null; }
         }
 
+        /// <summary>A DWM thumbnail can go stale across a minimize/restore - detach so it re-registers fresh next tick.</summary>
+        private void ReacquireLiveViews(string why)
+        {
+            try
+            {
+                if (_live != null && _live.Attached) { _live.Detach(); _liveLogged = false; }
+                ClearVrmon();
+                _log.Debug("LIVEVIEW", "Re-acquiring live views (" + why + ")");
+                BeginInvoke((Action)delegate { if (!_exiting) { UpdateLiveView(); PositionLiveView(); } });
+            }
+            catch { }
+        }
+
         private void UpdateGameView()
         {
             if (_live == null) return;
@@ -1212,10 +1236,24 @@ namespace VRModLoader
         private void EnterGuard()
         {
             _guardActive = true;
+            // the guard must black out the WHOLE screen, including the title bar and taskbar - go borderless fullscreen
+            // if we are not already (e.g. a windowed, attach-and-watch session), and remember how to put it back.
+            if (!_fullscreen && FormBorderStyle != FormBorderStyle.None)
+            {
+                _guardForcedFs = true;
+                _guardPrevBorder = FormBorderStyle;
+                _guardPrevState = WindowState;
+                _guardPrevBounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+                SuspendLayout();
+                FormBorderStyle = FormBorderStyle.None;
+                WindowState = FormWindowState.Normal;
+                WindowState = FormWindowState.Maximized;
+                ResumeLayout();
+            }
             _root.Visible = false;
             BackColor = Color.Black;
             Drift();
-            _log.Info("OLED", "No input for " + _s.OledGuardSeconds + "s - OLED guard on (near-black screen, drifting status)");
+            _log.Info("OLED", "No input for " + _s.OledGuardSeconds + "s - OLED guard on (full-screen near-black, drifting status)");
         }
 
         private void ExitGuard(string why)
@@ -1223,6 +1261,16 @@ namespace VRModLoader
             _guardActive = false;
             BackColor = Theme.Bg;
             _root.Visible = true;
+            if (_guardForcedFs)
+            {
+                _guardForcedFs = false;
+                SuspendLayout();
+                WindowState = FormWindowState.Normal;
+                FormBorderStyle = _guardPrevBorder;
+                if (_guardPrevState == FormWindowState.Maximized) WindowState = FormWindowState.Maximized;
+                else if (_guardPrevBounds.Width > 300 && _guardPrevBounds.Height > 200) Bounds = _guardPrevBounds;
+                ResumeLayout();
+            }
             Invalidate();
             PositionLiveView();
             _log.Info("OLED", "OLED guard off (" + why + ")");
@@ -1625,6 +1673,7 @@ namespace VRModLoader
             WindowState = _fullscreen ? FormWindowState.Maximized : FormWindowState.Normal;
             Activate();
             WindowUtil.ForceForeground(Handle);
+            ReacquireLiveViews("restored from tray");
             _log.Debug("APP", "Window restored from the tray");
         }
 

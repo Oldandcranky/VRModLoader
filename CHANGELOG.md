@@ -3,6 +3,17 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.3.4 - 2026-10-10
+
+### Fixed
+- OLED guard now blacks out the whole screen. In a windowed (attach-and-watch) session it left the title bar and
+  taskbar lit; it now goes borderless-fullscreen while the guard is on and restores the window afterwards.
+- Live view sometimes stayed black after minimizing and restoring (or coming back from the tray). The DWM thumbnail
+  is now detached and re-registered on restore so it always comes back.
+
+### Internal
+- Added the OpenVR frame-stats backend (not yet wired into the UI).
+
 ## 1.3.3 - 2026-10-10
 
 ### Fixed
