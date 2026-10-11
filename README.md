@@ -70,7 +70,9 @@ opening CircuitLord's window.
 ## In game
 
 - **Dashboard**: the launcher stays on screen; the **LIVE VIEW** tab shows the game's mirror window live (a DWM
-  thumbnail - zero load, no input) with a compact log underneath.
+  thumbnail - zero load, no input), the SteamVR Status window (device icons, frame graph) beside it, a **link quality**
+  panel (round trip now / avg / max / jitter, spikes, sparkline, headset battery - from Meta's per-second clock-sync
+  samples, Air Link or cable) and a compact log underneath.
 - **Headset link watch**: Meta's service log and SteamVR's monitor log are tailed. USB errors, `termination_reason`,
   SteamVR Standby and low headset battery show up red, pop a tray balloon, and go into the session record.
 - **OLED guard**: after 2 min without mouse/keyboard the screen goes near-black with a dim, drifting timer and a

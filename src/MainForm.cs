@@ -75,6 +75,10 @@ namespace VRModLoader
         private LiveView _live;
         private bool _liveLogged;
         private bool _liveRestoredLogged;
+        private LiveView _liveVrmon;          // picture of the SteamVR Status window
+        private Panel _vrmonPanel;
+        private Label _vrmonHint;
+        private LinkQualityPanel _linkPanel;
         private TimeSpan _played;
         private bool _guardActive;
         private Point _guardTextPos;
@@ -176,6 +180,7 @@ namespace VRModLoader
             _engine.SessionEnded += delegate(SessionRecord r) { Ui(delegate { OnSessionEnded(r); }); };
             _engine.GameDetected += delegate { Ui(delegate { OnGameDetected(); }); };
             _live = new LiveView(this);
+            _liveVrmon = new LiveView(this);
             _engine.FocusRequested += delegate { Ui(delegate { if (_fullscreen && !_inTray) WindowUtil.ForceForeground(Handle); }); };
             _engine.Coach += delegate(string title, string body) { Ui(delegate { ShowCoach(title, body); }); };
             _engine.StepsReordered += delegate { Ui(delegate { BuildStepRows(); }); };
@@ -944,29 +949,131 @@ namespace VRModLoader
             _miniLog.HideSelection = false;
             _miniLog.Margin = new Padding(0, S(2), 0, 0);
 
+            // middle row: game picture on the left, SteamVR Status picture + link quality on the right
+            var middle = new TableLayoutPanel();
+            middle.Dock = DockStyle.Fill;
+            middle.Margin = new Padding(0);
+            middle.BackColor = Theme.Panel;
+            middle.ColumnCount = 2;
+            middle.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            middle.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, S(340)));
+            middle.RowCount = 1;
+            middle.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            var side = new TableLayoutPanel();
+            side.Dock = DockStyle.Fill;
+            side.Margin = Theme.Pad(2, 0, 0, 0);
+            side.BackColor = Theme.Panel;
+            side.ColumnCount = 1;
+            side.RowCount = 2;
+            side.RowStyles.Add(new RowStyle(SizeType.Absolute, S(372)));
+            side.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            _vrmonPanel = new Panel();
+            _vrmonPanel.Dock = DockStyle.Fill;
+            _vrmonPanel.BackColor = Color.Black;
+            _vrmonPanel.Margin = new Padding(0);
+            _vrmonHint = Theme.Label("The SteamVR Status window appears here while SteamVR runs", Theme.Dim, Theme.Small);
+            _vrmonHint.AutoSize = false;
+            _vrmonHint.Dock = DockStyle.Fill;
+            _vrmonHint.TextAlign = ContentAlignment.MiddleCenter;
+            _vrmonHint.Padding = Theme.Pad(10, 0, 10, 0);
+            _vrmonPanel.Controls.Add(_vrmonHint);
+            _vrmonPanel.Resize += delegate { PositionLiveView(); };
+
+            _linkPanel = new LinkQualityPanel();
+            _linkPanel.Dock = DockStyle.Fill;
+            _linkPanel.Margin = Theme.Pad(0, 2, 0, 0);
+
+            side.Controls.Add(_vrmonPanel, 0, 0);
+            side.Controls.Add(_linkPanel, 0, 1);
+            middle.Controls.Add(_livePanel, 0, 0);
+            middle.Controls.Add(side, 1, 0);
+
             grid.Controls.Add(info, 0, 0);
-            grid.Controls.Add(_livePanel, 0, 1);
+            grid.Controls.Add(middle, 0, 1);
             grid.Controls.Add(_miniLog, 0, 2);
             pane.Controls.Add(grid);
             return pane;
         }
 
-        /// <summary>Puts the DWM picture where it belongs: over the live panel, over the drifting guard rect, or nowhere.</summary>
+        private bool WantPictures
+        {
+            get { return Visible && !_inTray && WindowState != FormWindowState.Minimized && _paneLive != null && _paneLive.Visible && _livePanel.IsHandleCreated; }
+        }
+
+        private Rectangle ClientRectOf(Control c, int inset)
+        {
+            var client = RectangleToClient(c.RectangleToScreen(c.ClientRectangle));
+            client.Inflate(-inset, -inset);
+            return client;
+        }
+
+        /// <summary>Puts the DWM pictures where they belong: over their panels, the game over the drifting guard rect, or nowhere.</summary>
         private void PositionLiveView()
         {
-            if (_live == null || !_live.Attached) return;
-            if (_guardActive) { _live.Place(_guardThumb, true, 110); return; }
-            bool show = Visible && !_inTray && WindowState != FormWindowState.Minimized && _paneLive != null && _paneLive.Visible && _livePanel.IsHandleCreated;
-            if (!show) { _live.Place(Rectangle.Empty, false, 255); return; }
-            var scr = _livePanel.RectangleToScreen(_livePanel.ClientRectangle);
-            var client = RectangleToClient(scr);
-            client.Inflate(-S(4), -S(4));
-            _live.Place(client, true, 255);
+            if (_live != null && _live.Attached)
+            {
+                if (_guardActive) _live.Place(_guardThumb, true, 110);
+                else if (!WantPictures) _live.Place(Rectangle.Empty, false, 255);
+                else _live.Place(ClientRectOf(_livePanel, S(4)), true, 255);
+            }
+            if (_liveVrmon != null && _liveVrmon.Attached)
+            {
+                if (_guardActive || !WantPictures || _vrmonPanel == null) _liveVrmon.Place(Rectangle.Empty, false, 255);
+                else _liveVrmon.Place(ClientRectOf(_vrmonPanel, S(2)), true, 255);
+            }
         }
 
         private void UpdateLiveView()
         {
-            if (_live == null || _s == null || !_s.LiveView || _liveHint == null) return;
+            if (_s == null || !_s.LiveView || _liveHint == null) return;
+            UpdateGameView();
+            UpdateVrmonView();
+            if (_linkPanel != null && _paneLive != null && _paneLive.Visible)
+                _linkPanel.Update(_engine != null ? _engine.Watcher : null, _engine != null && _engine.InGame);
+        }
+
+        /// <summary>Live picture of the SteamVR Status window (device icons + frame graph) whenever SteamVR runs.</summary>
+        private void UpdateVrmonView()
+        {
+            if (_liveVrmon == null || _vrmonHint == null) return;
+            if (!ProcessUtil.IsRunning("vrmonitor"))
+            {
+                if (_liveVrmon.Attached) _liveVrmon.Detach();
+                _vrmonHint.Text = "SteamVR is not running - its status window appears here when it is";
+                _vrmonHint.Visible = true;
+                return;
+            }
+            if (!_liveVrmon.Attached || !_liveVrmon.SourceAlive)
+            {
+                string title; Rectangle b;
+                IntPtr h = WindowUtil.FindLargestWindow("vrmonitor", out title, out b);
+                if (h != IntPtr.Zero && _liveVrmon.Attach(h, title))
+                {
+                    _vrmonHint.Visible = false;
+                    PositionLiveView();
+                    _log.Debug("LIVEVIEW", "SteamVR status window pictured (\"" + title + "\", " + b.Width + "x" + b.Height + ")");
+                }
+                else
+                {
+                    _vrmonHint.Text = "Waiting for the SteamVR Status window…";
+                    _vrmonHint.Visible = true;
+                }
+                return;
+            }
+            if (_liveVrmon.SourceMinimized)
+            {
+                if (WantPictures) WindowUtil.RestoreBehind(_liveVrmon.Source, Handle);
+                _vrmonHint.Text = "Restoring the SteamVR window…";
+                _vrmonHint.Visible = true;
+            }
+            else _vrmonHint.Visible = false;
+        }
+
+        private void UpdateGameView()
+        {
+            if (_live == null) return;
             var pids = ProcessUtil.Pids("Titanfall2VRLauncher");
             if (pids.Length == 0)
             {
@@ -1150,7 +1257,13 @@ namespace VRModLoader
                 it.SubItems.Add(r.Outcome ?? "").Tag = oc;
                 it.SubItems.Add(r.DurationSec > 0 ? ProcessUtil.FormatSpan(TimeSpan.FromSeconds(r.DurationSec)) : "-");
                 it.SubItems.Add(r.ExitCode == long.MinValue ? "-" : "0x" + unchecked((uint)r.ExitCode).ToString("X8")).Tag = r.ExitCode == 0 || r.ExitCode == long.MinValue ? Theme.Dim : Theme.Error;
-                it.SubItems.Add(string.IsNullOrEmpty(r.Reason) ? (r.ExitName ?? "") : r.Reason);
+                string notes = string.IsNullOrEmpty(r.Reason) ? (r.ExitName ?? "") : r.Reason;
+                if (r.LinkSamples > 0)
+                    notes = (notes.Length > 0 ? notes + "  ·  " : "") + (r.LinkTransport ?? "link") + " " + GameLogWatcher.Quality(r.LinkAvgRttMs, r.LinkMaxRttMs)
+                        + " (avg " + r.LinkAvgRttMs.ToString("0.0", CultureInfo.InvariantCulture) + " ms, max " + r.LinkMaxRttMs.ToString("0", CultureInfo.InvariantCulture)
+                        + (r.LinkSpikes > 0 ? ", " + r.LinkSpikes + " spikes" : "") + ")";
+                if (r.HeadsetBattery >= 0) notes += "  ·  battery " + r.HeadsetBattery + "%";
+                it.SubItems.Add(notes);
                 it.SubItems.Add(r.ModVersion ?? "");
                 it.SubItems.Add(r.StepSeconds == null ? "" : string.Join("  ", r.StepSeconds.Select(kv => kv.Key + " " + kv.Value.ToString("0.0", CultureInfo.InvariantCulture) + "s")));
                 foreach (ListViewItem.ListViewSubItem si in it.SubItems) if (si.Tag == null) si.Tag = Theme.Text;
@@ -1548,6 +1661,7 @@ namespace VRModLoader
             if (_didMinimizeAll) { _didMinimizeAll = false; WindowUtil.UndoMinimizeAll(_log); }
             if (_awake) { _awake = false; WindowUtil.KeepSystemAwake(false); }
             if (_live != null) _live.Dispose();
+            if (_liveVrmon != null) _liveVrmon.Dispose();
             _flush.Stop();
             _clock.Stop();
             if (_tray != null) { _tray.Visible = false; _tray.Dispose(); }

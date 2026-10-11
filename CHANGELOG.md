@@ -3,6 +3,16 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.3.0 - 2026-10-10
+
+### Added
+- **SteamVR Status picture** in the LIVE VIEW tab: Valve's device icons and frame-time graph, live, next to the game
+  view (same DWM technique; the window is kept open behind the launcher instead of minimized).
+- **Link quality panel**: Meta's service logs a round trip every second while streaming (Air Link or cable). The
+  dashboard shows the current round trip, session average / max / jitter, spike count, a 90-second sparkline, the
+  headset battery and on/off state and SteamVR's state. The session record gets the averages ("Air Link good (avg 6
+  ms, max 24)") and the Sessions tab shows them.
+
 ## 1.2.3 - 2026-10-10
 
 ### Fixed

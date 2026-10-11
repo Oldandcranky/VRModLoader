@@ -283,6 +283,100 @@ namespace VRModLoader
         }
     }
 
+    /// <summary>Air Link / USB Link quality from Meta's per-second round-trip samples: big number, averages, sparkline.</summary>
+    internal sealed class LinkQualityPanel : Panel
+    {
+        private GameLogWatcher _w;
+        private bool _inGame;
+
+        public LinkQualityPanel()
+        {
+            DoubleBuffered = true;
+            BackColor = Theme.Panel;
+            Padding = Theme.Pad(12, 10, 12, 10);
+        }
+
+        public void Update(GameLogWatcher w, bool inGame)
+        {
+            _w = w;
+            _inGame = inGame;
+            Invalidate();
+        }
+
+        private static Color RttColor(double ms)
+        {
+            if (ms < 0) return Theme.Dim;
+            if (ms < 15) return Theme.Ok;
+            if (ms < 35) return Theme.Warn;
+            return Theme.Error;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            var g = e.Graphics;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            int x = Padding.Left, y = Padding.Top, w = Width - Padding.Horizontal;
+            var wtc = _w;
+            string title = (wtc != null && wtc.LinkSamples > 0 ? wtc.LinkTransport : "LINK") + " QUALITY";
+            TextRenderer.DrawText(g, title.ToUpperInvariant(), Theme.Heading, new Point(x, y), Theme.Accent);
+            y += Theme.S(26);
+
+            if (wtc == null || wtc.LinkSamples == 0)
+            {
+                string msg = _inGame ? "Waiting for link samples - Meta reports one per second while streaming." : "Link stats appear here while a session runs.";
+                TextRenderer.DrawText(g, msg, Theme.Small, new Rectangle(x, y, w, Theme.S(40)), Theme.Dim, TextFormatFlags.WordBreak);
+                return;
+            }
+
+            bool stale = (DateTime.Now - wtc.LinkLastSample).TotalSeconds > 5;
+            string big = wtc.LinkRttMs.ToString("0.0", CultureInfo.InvariantCulture) + " ms";
+            var bigSize = TextRenderer.MeasureText(g, big, Theme.Title);
+            TextRenderer.DrawText(g, big, Theme.Title, new Point(x, y), stale ? Theme.Dim : RttColor(wtc.LinkRttMs));
+            TextRenderer.DrawText(g, stale ? "round trip (no sample for " + (int)(DateTime.Now - wtc.LinkLastSample).TotalSeconds + "s)" : "round trip now",
+                Theme.Small, new Point(x + bigSize.Width + Theme.S(8), y + bigSize.Height - Theme.S(20)), Theme.Dim);
+            y += bigSize.Height + Theme.S(4);
+
+            string q = GameLogWatcher.Quality(wtc.LinkRttAvgMs, wtc.LinkRttMaxMs);
+            TextRenderer.DrawText(g, "avg " + wtc.LinkRttAvgMs.ToString("0.0", CultureInfo.InvariantCulture) + "   max " + wtc.LinkRttMaxMs.ToString("0.0", CultureInfo.InvariantCulture)
+                + "   jitter " + wtc.LinkJitterMs.ToString("0.0", CultureInfo.InvariantCulture) + " ms", Theme.UI, new Point(x, y), Theme.Text);
+            y += Theme.S(22);
+            TextRenderer.DrawText(g, "session: " + q + "   ·   " + wtc.LinkSpikes + " spike" + (wtc.LinkSpikes == 1 ? "" : "s") + " > " + GameLogWatcher.SpikeMs + " ms   ·   " + wtc.LinkSamples + " samples",
+                Theme.Small, new Point(x, y), q == "excellent" || q == "good" ? Theme.Ok : q == "fair" ? Theme.Warn : Theme.Error);
+            y += Theme.S(20);
+            string extra = (wtc.HeadsetBattery >= 0 ? "headset battery " + wtc.HeadsetBattery + "%   ·   " : "") + "headset " + (wtc.HeadsetOn ? "on" : "off")
+                + (wtc.SteamVrState.Length > 0 ? "   ·   SteamVR " + wtc.SteamVrState : "");
+            TextRenderer.DrawText(g, extra, Theme.Small, new Point(x, y), Theme.Dim);
+            y += Theme.S(24);
+
+            // sparkline of the last samples; scale to max(30 ms, window max)
+            int h = Height - Padding.Bottom - y;
+            if (h < Theme.S(30)) return;
+            var hist = wtc.LinkHistory;
+            int n = Math.Min(wtc.LinkHistoryPos, hist.Length);
+            if (n < 2) return;
+            double top = 30;
+            for (int i = 0; i < n; i++) { double v = hist[(wtc.LinkHistoryPos - n + i) % hist.Length]; if (v > top) top = v; }
+            var area = new Rectangle(x, y, w, h);
+            using (var bg = new SolidBrush(Theme.Bg)) g.FillRectangle(bg, area);
+            using (var grid = new Pen(Theme.Border))
+            {
+                float y20 = area.Bottom - (float)(20 / top) * area.Height;
+                g.DrawLine(grid, area.Left, y20, area.Right, y20);
+                TextRenderer.DrawText(g, "20 ms", Theme.Small, new Point(area.Right - Theme.S(42), (int)y20 - Theme.S(16)), Theme.Dim);
+            }
+            var pts = new PointF[n];
+            for (int i = 0; i < n; i++)
+            {
+                double v = hist[(wtc.LinkHistoryPos - n + i) % hist.Length];
+                pts[i] = new PointF(area.Left + (float)i / (hist.Length - 1) * area.Width, area.Bottom - (float)(v / top) * (area.Height - 2) - 1);
+            }
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var pen = new Pen(RttColor(wtc.LinkRttAvgMs), 1.6f)) g.DrawLines(pen, pts);
+            using (var dot = new SolidBrush(RttColor(wtc.LinkRttMs))) { var p = pts[n - 1]; g.FillEllipse(dot, p.X - 3, p.Y - 3, 6, 6); }
+        }
+    }
+
     /// <summary>One pre-flight result line: coloured glyph, name, detail (full text in the tooltip).</summary>
     internal sealed class CheckRow : Panel
     {

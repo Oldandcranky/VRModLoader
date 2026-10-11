@@ -21,6 +21,12 @@ namespace VRModLoader
         public string NsLog { get; set; }
         public string LogFile { get; set; }
         public Dictionary<string, double> StepSeconds { get; set; }
+        public string LinkTransport { get; set; }
+        public double LinkAvgRttMs { get; set; }
+        public double LinkMaxRttMs { get; set; }
+        public int LinkSamples { get; set; }
+        public int LinkSpikes { get; set; }
+        public int HeadsetBattery { get; set; }
 
         public SessionRecord()
         {
@@ -28,6 +34,7 @@ namespace VRModLoader
             ExitCode = long.MinValue;
             Outcome = "";
             Reason = "";
+            HeadsetBattery = -1;
         }
     }
 

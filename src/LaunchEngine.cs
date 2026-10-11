@@ -48,6 +48,8 @@ namespace VRModLoader
         public EnginePhase Phase { get; private set; }
         public SessionRecord LastSession { get; private set; }
         public int GamePid { get { return _gamePid; } }
+        /// <summary>The log watcher of the current (or most recent) session - link quality, battery, SteamVR state.</summary>
+        public GameLogWatcher Watcher { get; private set; }
 
         public event Action<StepInfo> StepChanged;
         public event Action<EnginePhase> PhaseChanged;
@@ -506,7 +508,8 @@ namespace VRModLoader
             _log.Debug(cat, "currently running: " + ProcessUtil.DescribeRunning(names));
         }
 
-        private static readonly string[] TidyTargets = { "vrmonitor", "EADesktop", "CircuitLordVRModInstaller" };
+        // vrmonitor (the SteamVR Status window) is deliberately not minimized: the dashboard shows a live picture of it.
+        private static readonly string[] TidyTargets = { "EADesktop", "CircuitLordVRModInstaller" };
 
         /// <summary>Focus mode: push the launched app's window out of the way and ask the UI to come back in front.</summary>
         private void Tidy(string cat, params string[] processNames)
@@ -744,7 +747,7 @@ namespace VRModLoader
             if (ProcessUtil.Missing(targets).Length == 0)
             {
                 st.Detail = "already running - " + ProcessUtil.DescribeRunning(targets);
-                Tidy(cat, "vrmonitor");
+                Raise(FocusRequested);
                 return;
             }
             bool steamWasUp = ProcessUtil.IsRunning("steam");
@@ -768,7 +771,7 @@ namespace VRModLoader
                 throw new StepTimeoutException("SteamVR is not fully up - missing: " + string.Join(", ", ProcessUtil.Missing(targets))
                     + (ProcessUtil.IsRunning("vrserver") && !ProcessUtil.IsRunning("vrcompositor") ? ". SteamVR is running but has not detected the headset yet (start Quest Link / Air Link)." : ""));
             Settle(st, cat, ct);
-            Tidy(cat, "vrmonitor");
+            Raise(FocusRequested);   // the SteamVR Status window stays open behind us - the dashboard pictures it
             st.Detail = "ready - " + ProcessUtil.DescribeRunning(targets);
         }
 
@@ -1091,6 +1094,7 @@ namespace VRModLoader
             Raise(GameDetected);
 
             GameLogWatcher watcher = _s.TailGameLogs ? new GameLogWatcher(_s.GamePath, _gameStart.AddSeconds(-10), _log, _s.ShowModuleLoads) : null;
+            Watcher = watcher;
             Process game = null;
             try { game = Process.GetProcessById(_gamePid); }
             catch (Exception ex) { _log.Warn(cat, "Cannot open the game process handle (" + ex.Message + ") - falling back to name polling"); }
@@ -1193,6 +1197,19 @@ namespace VRModLoader
             record.ExitCode = exitCode;
             record.ExitName = exitCode == long.MinValue ? "" : GameInfo.NtStatusName(exitCode);
             record.CrashDir = _sessionDir;
+
+            if (watcher != null && watcher.LinkSamples > 0)
+            {
+                record.LinkTransport = watcher.LinkTransport;
+                record.LinkAvgRttMs = Math.Round(watcher.LinkRttAvgMs, 1);
+                record.LinkMaxRttMs = Math.Round(watcher.LinkRttMaxMs, 1);
+                record.LinkSamples = watcher.LinkSamples;
+                record.LinkSpikes = watcher.LinkSpikes;
+                _log.Info(cat, watcher.LinkTransport + " quality this session: " + GameLogWatcher.Quality(watcher.LinkRttAvgMs, watcher.LinkRttMaxMs)
+                    + " - round trip avg " + watcher.LinkRttAvgMs.ToString("0.0", CultureInfo.InvariantCulture) + " ms, max " + watcher.LinkRttMaxMs.ToString("0.0", CultureInfo.InvariantCulture)
+                    + " ms, " + watcher.LinkSpikes + " spike(s) over " + GameLogWatcher.SpikeMs + " ms in " + watcher.LinkSamples + " samples");
+            }
+            if (watcher != null && watcher.HeadsetBattery >= 0) record.HeadsetBattery = watcher.HeadsetBattery;
 
             string linkNote = null;
             if (watcher != null && watcher.LinkDropReason != null)

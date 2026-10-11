@@ -61,7 +61,7 @@ namespace VRModLoader
     /// crash_monitor's monitor.txt. Everything lands in the Game Log; errors/warnings are also mirrored
     /// into the main log so nothing important hides in the firehose.
     /// </summary>
-    internal sealed class GameLogWatcher
+    public sealed class GameLogWatcher
     {
         private readonly string _gp;
         private readonly DateTime _since;
@@ -90,6 +90,66 @@ namespace VRModLoader
         /// <summary>Special alert value meaning "the earlier alert is resolved - clear it".</summary>
         public const string ClearAlert = "<clear>";
 
+        // ---- link quality: Meta's service logs a clock-sync round trip every second while streaming (nanoseconds) ----
+        public double LinkRttMs = -1, LinkJitterMs = -1, LinkRttAvgMs = -1, LinkRttMaxMs = -1;
+        public int LinkSamples, LinkSpikes;
+        public DateTime LinkLastSample = DateTime.MinValue;
+        public readonly double[] LinkHistory = new double[90];
+        public int LinkHistoryPos;
+        public string LinkTransport = "Link";
+        private double _rttSum;
+        private DateTime _lastSpikeLog = DateTime.MinValue;
+        private DateTime _lastTransportCheck = DateTime.MinValue;
+        public const double SpikeMs = 50;
+
+        private void HandleClockLine(string ln)
+        {
+            // ... new clock offset=5568450847093 (rtt: 2502246, dispersion: 522900, jitter: 1214832)
+            long rtt = ParseLong(ln, "rtt: "), jit = ParseLong(ln, "jitter: ");
+            if (rtt <= 0) return;
+            double ms = rtt / 1e6, jms = jit / 1e6;
+            LinkRttMs = ms;
+            LinkJitterMs = jms;
+            LinkSamples++;
+            _rttSum += ms;
+            LinkRttAvgMs = _rttSum / LinkSamples;
+            if (ms > LinkRttMaxMs) LinkRttMaxMs = ms;
+            LinkHistory[LinkHistoryPos % LinkHistory.Length] = ms;
+            LinkHistoryPos++;
+            LinkLastSample = DateTime.Now;
+            _log.Game("LINKQ", LinkTransport + " round trip " + ms.ToString("0.0") + " ms, jitter " + jms.ToString("0.0") + " ms");
+            if (ms > SpikeMs)
+            {
+                LinkSpikes++;
+                if ((DateTime.Now - _lastSpikeLog).TotalSeconds > 10)
+                {
+                    _lastSpikeLog = DateTime.Now;
+                    _log.Warn("LINK", LinkTransport + " latency spike: " + ms.ToString("0") + " ms round trip (session avg " + LinkRttAvgMs.ToString("0.0") + " ms)");
+                }
+            }
+            else if (LinkSamples % 60 == 0)
+                _log.Debug("LINK", LinkTransport + " round trip avg " + LinkRttAvgMs.ToString("0.0") + " ms, max " + LinkRttMaxMs.ToString("0.0") + " ms, " + LinkSamples + " samples, " + LinkSpikes + " spikes");
+        }
+
+        private static long ParseLong(string s, string marker)
+        {
+            int i = s.IndexOf(marker, StringComparison.Ordinal);
+            if (i < 0) return -1;
+            i += marker.Length;
+            long v = 0; bool any = false;
+            while (i < s.Length && char.IsDigit(s[i])) { v = v * 10 + (s[i] - '0'); i++; any = true; }
+            return any ? v : -1;
+        }
+
+        public static string Quality(double avg, double max)
+        {
+            if (avg < 0) return "";
+            if (avg < 8 && max < 25) return "excellent";
+            if (avg < 15 && max < 45) return "good";
+            if (avg < 25 && max < 80) return "fair";
+            return "poor";
+        }
+
         /// <summary>Headset/runtime problems noticed since the last call (for tray balloons).</summary>
         public List<string> TakeAlerts()
         {
@@ -117,6 +177,11 @@ namespace VRModLoader
         /// <summary>Meta's service log and SteamVR's vrmonitor log: that is where a dropped Link / lost headset shows up first.</summary>
         private void EnsureRuntimeTails()
         {
+            if ((DateTime.Now - _lastTransportCheck).TotalSeconds >= 30)
+            {
+                _lastTransportCheck = DateTime.Now;
+                try { LinkTransport = Headset.Usb().State == UsbState.LinkMode ? "USB Link" : "Air Link"; } catch { }
+            }
             if ((DateTime.Now - _lastRuntimeScan).TotalSeconds < 30) return;
             _lastRuntimeScan = DateTime.Now;
             try
@@ -152,6 +217,7 @@ namespace VRModLoader
 
         private void HandleMetaLine(string ln)
         {
+            if (ln.IndexOf("new clock offset", StringComparison.Ordinal) >= 0) { HandleClockLine(ln); return; }
             if (ln.IndexOf("termination_reason:", StringComparison.Ordinal) >= 0)
             {
                 string reason = After(ln, "termination_reason:").Split(' ')[0];
