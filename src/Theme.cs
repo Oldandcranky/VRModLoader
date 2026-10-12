@@ -56,7 +56,7 @@ namespace VRModLoader
         public static Point Pt(int x, int y) { return new Point(S(x), S(y)); }
         public static Padding Pad(int l, int t, int r, int b) { return new Padding(S(l), S(t), S(r), S(b)); }
 
-        private static Font Pick(string[] names, float size, FontStyle style)
+        internal static Font Pick(string[] names, float size, FontStyle style)
         {
             foreach (var n in names)
             {

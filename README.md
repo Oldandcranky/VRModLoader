@@ -13,6 +13,16 @@ pre-flight → back up saves → kill Discord → Meta Horizon → SteamVR → E
           → desktop restored
 ```
 
+## Simple view and full nerd
+
+The launcher opens on the **simple view**: one glowing green **LAUNCH** button. Press it and it says what is happening
+in plain words - getting things ready, then *your turn*: put on the headset and turn on Link (clock → Link → this PC),
+then starting the game, then a big play timer. Everything it opens stays minimized. Problems show up as a screen with
+a couple of big buttons (*Keep waiting*, *Try again*), and update notices as a small badge in the header.
+
+**FULL NERD** (top right) switches to the dashboard described below - pre-flight, step list, logs, live view, stats,
+settings. Both views stay live; **SIMPLE** in the dashboard header switches back.
+
 ## Build
 
 Nothing to install - it uses the C# compiler that ships with Windows (.NET Framework 4.8).

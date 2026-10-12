@@ -112,6 +112,13 @@ namespace VRModLoader
         private Panel _coach;
         private Label _coachTitle, _coachBody;
 
+        // simple view: the default face; everything above is "full nerd" and keeps running underneath
+        private SimpleView _simple;
+        private bool _simpleMode = true;
+        private PendingAsk _pendingAsk;
+        private Button _btnSimple;
+        private string _updateNotes;
+
         private static int S(int px) { return Theme.S(px); }
 
         public MainForm(Logger log)
@@ -133,6 +140,7 @@ namespace VRModLoader
             DoubleBuffered = true;
 
             BuildUi();
+            BuildSimple();
             BuildTray();
 
             _log.EntryAdded += delegate(LogEntry e) { _queue.Enqueue(e); };
@@ -167,8 +175,9 @@ namespace VRModLoader
             };
             KeyDown += delegate(object s, KeyEventArgs e)
             {
-                if (e.KeyCode == Keys.F5 && _launch.Enabled) { e.Handled = true; _launch.PerformClick(); }
-                if (e.KeyCode == Keys.Escape && _countdownPanel.Visible) { e.Handled = true; _engine.CancelCountdown(); }
+                if (e.KeyCode == Keys.F5 && _launch.Enabled) { e.Handled = true; StartSequence(); }
+                if (e.KeyCode == Keys.Escape && _simpleMode && _simple.AnswerLast()) { e.Handled = true; return; }   // like the dialog's Cancel
+                if (e.KeyCode == Keys.Escape && _engine != null && _engine.Phase == EnginePhase.Countdown) { e.Handled = true; _engine.CancelCountdown(); }
                 if (e.KeyCode == Keys.F11) { e.Handled = true; if (_fullscreen) ExitFullscreen(); else EnterFullscreen(); }
             };
         }
@@ -190,9 +199,15 @@ namespace VRModLoader
 
             _s = AppSettings.Load(_log);
             _log.Debug("SETTINGS", "Effective settings:\r\n" + _s.Dump());
+            _simple.Settings = _s;
 
             _engine = new LaunchEngine(_s, _log);
-            _engine.StepChanged += delegate(StepInfo st) { Ui(delegate { StepRow r; if (_rows.TryGetValue(st.Id, out r)) r.Apply(); }); };
+            _engine.TidySteamVrStatus = _simpleMode;
+            _engine.StepChanged += delegate(StepInfo st)
+            {
+                var state = st.State;   // StepInfo is shared and keeps changing - take the state as it is now, on the worker
+                Ui(delegate { StepRow r; if (_rows.TryGetValue(st.Id, out r)) r.Apply(); _simple.SetStep(st.Id, state); });
+            };
             _engine.PhaseChanged += delegate(EnginePhase p) { Ui(delegate { OnPhase(p); }); };
             _engine.PreflightDone += delegate(List<CheckResult> list) { Ui(delegate { ShowChecks(list); }); };
             _engine.GameTick += delegate(TimeSpan t, int pid)
@@ -200,6 +215,7 @@ namespace VRModLoader
                 Ui(delegate
                 {
                     _played = t;
+                    _simple.SetGameTime(t);
                     _statusGame.Text = "Game PID " + pid + "  ·  " + ProcessUtil.FormatSpan(t);
                     _phaseText = (_alertText ?? "IN GAME") + "  " + ProcessUtil.FormatSpan(t);
                     _header.Invalidate();
@@ -217,6 +233,7 @@ namespace VRModLoader
             {
                 Ui(delegate
                 {
+                    _simple.SetAlert(msg);
                     if (msg == null) { ClearAlert(); return; }
                     _alertText = msg.ToUpperInvariant();
                     _alertAt = DateTime.Now;
@@ -263,6 +280,7 @@ namespace VRModLoader
             var ph = _engine.Phase;
             if (ph != EnginePhase.Idle && ph != EnginePhase.Stopped && ph != EnginePhase.Crashed) return;
             var pids = ProcessUtil.Pids("Titanfall2VRLauncher");
+            _simple.SetForeignGame(pids.Length > 0);
             if (pids.Length > 0)
             {
                 _statusGame.Text = "Titanfall 2 VR is running outside the launcher (PID " + pids[0] + ")  -  press ATTACH to watch it";
@@ -335,6 +353,7 @@ namespace VRModLoader
         {
             _updateVersion = version;
             _updateUrl = url;
+            _updateNotes = notes;
             _log.Info("UPDATE", "Version " + version + " is available (you have " + Program.Version + ")");
             if (_updateBtn == null)
             {
@@ -348,10 +367,13 @@ namespace VRModLoader
                 _updateBtn.TabStop = false;
                 new ToolTip().SetToolTip(_updateBtn, "Download and install version " + version + " from GitHub");
                 _updateBtn.Click += delegate { DoUpdate(notes); };
+                _updateBtn.TextChanged += delegate { SyncBadges(); };
+                _updateBtn.EnabledChanged += delegate { SyncBadges(); };
                 _header.Controls.Add(_updateBtn);
                 _header.Resize += delegate { PlaceUpdateButton(); };
             }
             PlaceUpdateButton();
+            SyncBadges();
             if (_tray != null) _tray.ShowBalloonTip(6000, "Update available", "VR Mod Loader " + version + " is ready - click UPDATE in the header.", ToolTipIcon.Info);
         }
 
@@ -400,6 +422,7 @@ namespace VRModLoader
             if (!info.AnyUpdate)
             {
                 if (_modBtn != null) { _modBtn.Visible = false; PlaceUpdateButton(); }
+                SyncBadges();
                 return;
             }
 
@@ -415,6 +438,8 @@ namespace VRModLoader
                 _modBtn.BackColor = Color.Transparent;
                 _modBtn.TabStop = false;
                 _modBtn.Click += delegate { DoModUpdate(); };
+                _modBtn.TextChanged += delegate { SyncBadges(); };
+                _modBtn.EnabledChanged += delegate { SyncBadges(); };
                 _header.Controls.Add(_modBtn);
             }
             _modBtn.Text = label;
@@ -422,6 +447,7 @@ namespace VRModLoader
             new ToolTip().SetToolTip(_modBtn, info.Summary);
             if (!_headerBadgeHooked) { _headerBadgeHooked = true; _header.Resize += delegate { PlaceUpdateButton(); }; }
             PlaceUpdateButton();
+            SyncBadges();
             if (_tray != null)
                 _tray.ShowBalloonTip(7000, info.ModNewer ? "Titanfall 2 VR mod update" : "CircuitLord installer update",
                     info.Summary + " - click MOD UPDATE in the header.", ToolTipIcon.Info);
@@ -551,6 +577,15 @@ namespace VRModLoader
             });
         }
 
+        /// <summary>The simple view's header badges mirror the dashboard's update buttons (text and enabled state).</summary>
+        private void SyncBadges()
+        {
+            if (_simple == null) return;
+            _simple.SetBadge(true, _updateBtn != null, _updateBtn != null ? _updateBtn.Text : null, _updateBtn != null && _updateBtn.Enabled);
+            bool mod = _modBtn != null && _modInfo != null && _modInfo.AnyUpdate;
+            _simple.SetBadge(false, mod, _modBtn != null ? _modBtn.Text : null, _modBtn != null && _modBtn.Enabled);
+        }
+
         private void UpdateModLabel()
         {
             var rec = GameInfo.ReadRecord(_s.GamePath);
@@ -594,6 +629,12 @@ namespace VRModLoader
             _btnExit = HeaderButton("✕", "Exit VR Mod Loader");
             _btnExit.FlatAppearance.MouseOverBackColor = ColorTranslator.FromHtml("#B3261E");
             _btnExit.Click += delegate { Close(); };
+            _btnSimple = HeaderButton("SIMPLE", "Back to the simple view");
+            _btnSimple.AutoSize = true;
+            _btnSimple.Padding = Theme.Pad(10, 0, 10, 0);
+            _btnSimple.ForeColor = Theme.Ok;
+            _btnSimple.Click += delegate { ShowSimple(); };
+            _header.Controls.Add(_btnSimple);
             _header.Controls.Add(_btnFocus);
             _header.Controls.Add(_btnMin);
             _header.Controls.Add(_btnWin);
@@ -638,6 +679,140 @@ namespace VRModLoader
             root.Controls.Add(status, 0, 2);
 
             Controls.Add(root);
+        }
+
+        // =====================================================================================
+        // simple view <-> full nerd
+        // =====================================================================================
+
+        private void BuildSimple()
+        {
+            _simple = new SimpleView(_logo);
+            _simple.LaunchClicked += delegate { StartWhenIdle(); };
+            _simple.PlayAgainClicked += delegate
+            {
+                if (_engine.Phase == EnginePhase.Countdown) _engine.CancelCountdown();   // keep the stack up: the relaunch is quick
+                StartWhenIdle();
+            };
+            _simple.TryAgainClicked += delegate { StartWhenIdle(); };
+            _simple.NerdClicked += delegate { ShowNerd(); };
+            _simple.StopClicked += delegate
+            {
+                // a launch still waiting for the previous run to finish: drop it, leave that run (e.g. its shutdown) alone
+                if (CancelPendingStart()) { _simple.CancelSequence("Stopped. Press launch to start again."); return; }
+                _engine.Stop();
+            };
+            _simple.StopGameClicked += delegate { ConfirmCloseAll(); };
+            _simple.CloseNowClicked += delegate { _engine.SkipCountdown(); };
+            _simple.CloseAllClicked += delegate { _engine.CloseAllNow(); };
+            _simple.AppUpdateClicked += delegate { DoUpdate(_updateNotes); };
+            _simple.ModUpdateClicked += delegate { DoModUpdate(); };
+            _simple.MinimizeClicked += delegate { WindowState = FormWindowState.Minimized; };
+            _simple.ExitClicked += delegate { Close(); };
+            Controls.Add(_simple);
+            ApplyView();
+        }
+
+        /// <summary>Shows the simple view or the dashboard. Both stay alive; only one is on screen (neither under the OLED guard).</summary>
+        private void ApplyView()
+        {
+            if (_engine != null) _engine.TidySteamVrStatus = _simpleMode;
+            if (_guardActive) return;
+            _simple.Visible = _simpleMode;
+            _root.Visible = !_simpleMode;
+            if (_simpleMode) _simple.BringToFront();
+            else
+            {
+                _root.BringToFront();
+                // header badges created while the dashboard was hidden were never placed (Visible reads false then)
+                LayoutHeaderButtons();
+                PlaceUpdateButton();
+            }
+            PositionLiveView();
+        }
+
+        private void ShowSimple()
+        {
+            if (_simpleMode) return;
+            _simpleMode = true;
+            ApplyView();
+            _log.Debug("APP", "Simple view");
+        }
+
+        private void ShowNerd()
+        {
+            if (!_simpleMode) return;
+            _simpleMode = false;
+            ApplyView();
+            ReacquireLiveViews("dashboard shown");
+            _log.Debug("APP", "Full nerd (dashboard)");
+            var ask = _pendingAsk;   // a question that was on the simple screen moves to a dialog
+            if (ask != null && !ask.Answered) BeginInvoke((Action)delegate { AskInDialog(ask); });
+        }
+
+        /// <summary>LAUNCH from the dashboard, F5 or the tray.</summary>
+        private void StartSequence()
+        {
+            if (_engine == null || _engine.IsBusy) return;
+            CancelPendingStart();
+            _relaunch.Visible = false;
+            _simple.SequenceStarting();
+            _engine.Start();
+        }
+
+        private Timer _startTimer;   // a simple-view launch waiting for the previous run to finish
+
+        /// <summary>
+        /// LAUNCH / Play again / Try again from the simple view. The screen moves on at once; the engine starts as soon as
+        /// it is free (after "Play again" or a crash the previous run is still finishing - a shutdown can take half a minute).
+        /// </summary>
+        private void StartWhenIdle()
+        {
+            if (_engine == null) return;
+            CancelPendingStart();
+            _relaunch.Visible = false;
+            _simple.SequenceStarting();
+            if (!_engine.IsBusy) { _engine.Start(); return; }
+            var since = DateTime.Now;
+            _startTimer = new Timer();
+            _startTimer.Interval = 250;
+            _startTimer.Tick += delegate
+            {
+                if (_exiting) { CancelPendingStart(); return; }
+                if (!_engine.IsBusy) { CancelPendingStart(); _engine.Start(); return; }
+                if (_engine.Phase == EnginePhase.ShuttingDown || (DateTime.Now - since).TotalSeconds < 60) return;
+                CancelPendingStart();
+                _log.Warn("ENGINE", "Could not start - the previous run is still busy after 60 s (phase " + _engine.Phase + ")");
+                _simple.CancelSequence("Could not start - the last session is still closing. Try again in a moment.");
+            };
+            _startTimer.Start();
+        }
+
+        /// <summary>Drops a queued simple-view launch. True if there was one.</summary>
+        private bool CancelPendingStart()
+        {
+            var t = _startTimer;
+            if (t == null) return false;
+            _startTimer = null;
+            t.Stop();
+            t.Dispose();
+            return true;
+        }
+
+        /// <summary>CLOSE ALL: in game it kills the game first, so it always asks.</summary>
+        private void ConfirmCloseAll()
+        {
+            if (_engine.InGame)
+            {
+                int a = DarkDialog.Show(this, "KILL THE GAME?",
+                    "Titanfall 2 VR is RUNNING - whoever is in the headset gets cut off instantly.\n\n"
+                    + "This force-kills the game, then closes SteamVR, the EA app, Meta Horizon and the CircuitLord window.\n\n"
+                    + "To end a session normally, quit the game from inside VR - the launcher tears everything down by itself afterwards.",
+                    new[] { "Kill the game + close all", "Cancel" }, 1);
+                if (a == 0) _engine.CloseAllNow();
+                return;
+            }
+            if (DarkDialog.Show(this, "Close the VR stack", "Close SteamVR, the EA app, Meta Horizon and the CircuitLord window now?", new[] { "Close all", "Cancel" }, 1) == 0) _engine.CloseAllNow();
         }
 
         private Control BuildLeft()
@@ -732,7 +907,7 @@ namespace VRModLoader
             _launch.Dock = DockStyle.Fill;
             _launch.Height = S(48);
             _launch.Margin = Theme.Pad(0, 0, 0, 8);
-            _launch.Click += delegate { _relaunch.Visible = false; _engine.Start(); };
+            _launch.Click += delegate { StartSequence(); };
             ctlGrid.Controls.Add(_launch, 0, 1);
             ctlGrid.SetColumnSpan(_launch, 3);
 
@@ -745,24 +920,11 @@ namespace VRModLoader
             _relaunch.Margin = Theme.Pad(2, 0, 2, 0);
             _relaunch.ForeColor = Theme.Accent;
             _relaunch.Visible = false;
-            _relaunch.Click += delegate { _relaunch.Visible = false; _engine.Start(); };
+            _relaunch.Click += delegate { StartSequence(); };
             _closeAll = Theme.Danger("⏏  CLOSE ALL");
             _closeAll.Dock = DockStyle.Fill;
             _closeAll.Margin = Theme.Pad(4, 0, 0, 0);
-            _closeAll.Click += delegate
-            {
-                if (_engine.InGame)
-                {
-                    int a = DarkDialog.Show(this, "KILL THE GAME?",
-                        "Titanfall 2 VR is RUNNING - whoever is in the headset gets cut off instantly.\n\n"
-                        + "This force-kills the game, then closes SteamVR, the EA app, Meta Horizon and the CircuitLord window.\n\n"
-                        + "To end a session normally, quit the game from inside VR - the launcher tears everything down by itself afterwards.",
-                        new[] { "Kill the game + close all", "Cancel" }, 1);
-                    if (a == 0) _engine.CloseAllNow();
-                    return;
-                }
-                if (DarkDialog.Show(this, "Close the VR stack", "Close SteamVR, the EA app, Meta Horizon and the CircuitLord window now?", new[] { "Close all", "Cancel" }, 1) == 0) _engine.CloseAllNow();
-            };
+            _closeAll.Click += delegate { ConfirmCloseAll(); };
             ctlGrid.Controls.Add(_stop, 0, 2);
             ctlGrid.Controls.Add(_relaunch, 1, 2);
             ctlGrid.Controls.Add(_closeAll, 2, 2);
@@ -843,6 +1005,7 @@ namespace VRModLoader
             {
                 x -= _btnFocus.Width; _btnFocus.Location = new Point(x, y);
             }
+            x -= _btnSimple.Width + S(4); _btnSimple.Location = new Point(x, y);
             _pillInset = _header.Width - x;
             _header.Invalidate();
         }
@@ -899,6 +1062,7 @@ namespace VRModLoader
             WindowState = FormWindowState.Maximized;   // borderless + maximized = true fullscreen, taskbar covered
             ResumeLayout();
             LayoutHeaderButtons();
+            _simple.SetFullscreen(true);
             _log.Debug("FOCUS", "Fullscreen on");
         }
 
@@ -912,6 +1076,7 @@ namespace VRModLoader
             if (_savedBounds.Width > 400 && _savedBounds.Height > 300) Bounds = _savedBounds;
             ResumeLayout();
             LayoutHeaderButtons();
+            _simple.SetFullscreen(false);
             _log.Debug("FOCUS", "Fullscreen off");
         }
 
@@ -1051,6 +1216,13 @@ namespace VRModLoader
             _coachBody.Padding = Theme.Pad(0, 8, 0, 0);
             _coach.Controls.Add(_coachBody);
             _coach.Controls.Add(_coachTitle);
+            int coachW = -1;   // re-wrap when the width settles (the banner may be filled while the dashboard is hidden)
+            _coach.Resize += delegate
+            {
+                if (_coach.Width == coachW) return;
+                coachW = _coach.Width;
+                _coachBody.MaximumSize = new Size(Math.Max(S(300), _coach.Width - S(40)), 0);
+            };
             host.Controls.Add(_coach);
 
             _tabLauncher.Click += delegate { SelectTab(0); };
@@ -1513,6 +1685,7 @@ namespace VRModLoader
 
         private void ClearAlert()
         {
+            _simple.SetAlert(null);
             if (_alertText == null) return;
             _alertText = null;
             if (_engine != null && _engine.InGame) { _phaseColor = Theme.Ok; _phaseText = "IN GAME  " + ProcessUtil.FormatSpan(_played); }
@@ -1521,6 +1694,7 @@ namespace VRModLoader
 
         private void ShowCoach(string title, string body)
         {
+            _simple.SetCoach(title, body);
             if (string.IsNullOrEmpty(title)) { _coach.Visible = false; return; }
             _coachTitle.Text = title;
             _coachBody.MaximumSize = new Size(Math.Max(S(300), _coach.Width - S(40)), 0);
@@ -1593,6 +1767,7 @@ namespace VRModLoader
                 ResumeLayout();
             }
             _root.Visible = false;
+            _simple.Visible = false;
             BackColor = Color.Black;
             // the white pointer is the brightest thing left on the panel - hide it; any input ends the guard and brings it back
             var blank = WindowUtil.BlankCursor();
@@ -1606,7 +1781,7 @@ namespace VRModLoader
             _guardActive = false;
             Cursor = Cursors.Default;
             BackColor = Theme.Bg;
-            _root.Visible = true;
+            ApplyView();
             if (_guardForcedFs)
             {
                 _guardForcedFs = false;
@@ -1728,14 +1903,39 @@ namespace VRModLoader
             try { BeginInvoke(a); } catch { }
         }
 
+        /// <summary>
+        /// The engine's questions (timeouts, attach, failed pre-flight). Called on the worker thread, which waits here
+        /// without holding up the UI: the simple view shows the question as a screen, the dashboard as a dialog.
+        /// </summary>
         private int AskFromWorker(string title, string msg, string[] buttons)
         {
             if (_exiting || IsDisposed) return buttons.Length - 1;
-            return (int)Invoke(new Func<int>(delegate
-            {
-                if (_inTray) ShowFromTray();
-                return DarkDialog.Show(this, title, msg, buttons, 0);
-            }));
+            var ask = new PendingAsk(title, msg, buttons);
+            try { BeginInvoke((Action)delegate { PresentAsk(ask); }); }
+            catch { return buttons.Length - 1; }
+            while (!ask.Done.WaitOne(250))
+                if (_exiting || IsDisposed) return buttons.Length - 1;
+            return ask.Answer;
+        }
+
+        private void PresentAsk(PendingAsk ask)
+        {
+            _pendingAsk = ask;
+            if (_inTray) ShowFromTray();
+            if (_guardActive) ExitGuard("question");
+            if (!_simpleMode) { AskInDialog(ask); return; }
+            _simple.ShowQuestion(ask);
+            // the dialog this replaces was TopMost - make sure the question is seen even in a window behind the EA app
+            if (WindowState == FormWindowState.Minimized) WindowState = _fullscreen ? FormWindowState.Maximized : FormWindowState.Normal;
+            Activate();
+            WindowUtil.ForceForeground(Handle);
+        }
+
+        private void AskInDialog(PendingAsk ask)
+        {
+            if (ask.Answered) return;
+            ask.Resolve(DarkDialog.Show(this, ask.Title, ask.Message, ask.Buttons, 0));
+            _simple.DropQuestion(ask);
         }
 
         private void OnPhase(EnginePhase p)
@@ -1755,6 +1955,7 @@ namespace VRModLoader
                 case EnginePhase.Stopped: _phaseText = "STOPPED"; _phaseColor = Theme.Warn; break;
             }
             _header.Invalidate();
+            _simple.SetPhase(p);
 
             bool sequenceRunning = p == EnginePhase.Launching || p == EnginePhase.InGame || p == EnginePhase.Countdown || p == EnginePhase.ShuttingDown;
             RefreshLaunchButton(p);
@@ -1787,6 +1988,7 @@ namespace VRModLoader
 
         private void OnCountdown(int sec)
         {
+            _simple.SetCountdown(sec);
             if (sec <= 0) { _countdownPanel.Visible = false; return; }
             _countdownPanel.Visible = true;
             _countdownLabel.Text = "Closing everything in " + sec + " s";
@@ -1796,6 +1998,7 @@ namespace VRModLoader
 
         private void OnSessionEnded(SessionRecord r)
         {
+            _simple.SessionEnded(r);
             LoadSessions();
             if (_inTray) ShowFromTray();
             string title = r.Outcome == "crash" ? "Titanfall 2 VR crashed" : r.Outcome == "clean" ? "Session finished" : "Session ended (" + r.Outcome + ")";
@@ -1983,8 +2186,8 @@ namespace VRModLoader
             menu.BackColor = Theme.Panel2;
             menu.ForeColor = Theme.Text;
             menu.Items.Add("Show window", null, delegate { ShowFromTray(); });
-            menu.Items.Add("Launch (F5)", null, delegate { ShowFromTray(); if (_launch.Enabled) _launch.PerformClick(); });
-            menu.Items.Add("Close everything now", null, delegate { ShowFromTray(); _closeAll.PerformClick(); });
+            menu.Items.Add("Launch (F5)", null, delegate { ShowFromTray(); if (_launch.Enabled) StartSequence(); });
+            menu.Items.Add("Close everything now", null, delegate { ShowFromTray(); if (_closeAll.Enabled) ConfirmCloseAll(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Exit", null, delegate { Close(); });
             _tray.ContextMenuStrip = menu;

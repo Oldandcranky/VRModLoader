@@ -71,6 +71,9 @@ namespace VRModLoader
         /// <summary>Supplied by the UI. Called on the worker thread; must block and return the chosen button index.</summary>
         public Func<string, string, string[], int> Ask;
 
+        /// <summary>Set by the UI while the simple view shows: no SteamVR picture there, so its status window is minimized too.</summary>
+        public volatile bool TidySteamVrStatus;
+
         private CancellationTokenSource _cts;
         private Task _task;
         private volatile bool _cancelCountdown;
@@ -750,7 +753,7 @@ namespace VRModLoader
             if (ProcessUtil.Missing(targets).Length == 0)
             {
                 st.Detail = "already running - " + ProcessUtil.DescribeRunning(targets);
-                Raise(FocusRequested);
+                TidySteamVr(cat);
                 return;
             }
             bool steamWasUp = ProcessUtil.IsRunning("steam");
@@ -774,8 +777,15 @@ namespace VRModLoader
                 throw new StepTimeoutException("SteamVR is not fully up - missing: " + string.Join(", ", ProcessUtil.Missing(targets))
                     + (ProcessUtil.IsRunning("vrserver") && !ProcessUtil.IsRunning("vrcompositor") ? ". SteamVR is running but has not detected the headset yet (start Quest Link / Air Link)." : ""));
             Settle(st, cat, ct);
-            Raise(FocusRequested);   // the SteamVR Status window stays open behind us - the dashboard pictures it
+            TidySteamVr(cat);
             st.Detail = "ready - " + ProcessUtil.DescribeRunning(targets);
+        }
+
+        /// <summary>The SteamVR Status window stays open behind us when the dashboard pictures it; the simple view minimizes it.</summary>
+        private void TidySteamVr(string cat)
+        {
+            if (TidySteamVrStatus && _s.MinimizeLaunchedApps) Tidy(cat, "vrmonitor");
+            else Raise(FocusRequested);
         }
 
         private void StepEa(StepInfo st, string cat, CancellationToken ct)
@@ -842,7 +852,8 @@ namespace VRModLoader
                 if (pr.Ready)
                 {
                     st.Detail = "headset visible to " + pr.RuntimeShort + " after " + attempt + " probe" + (attempt == 1 ? "" : "s") + " (" + pr.Extensions + " extensions)";
-                    Tidy(cat, TidyTargets);   // final sweep: late-appearing windows (the EA app takes a while to draw its window)
+                    // final sweep: late-appearing windows (the EA app takes a while to draw its window)
+                    Tidy(cat, TidySteamVrStatus ? TidyTargets.Concat(new[] { "vrmonitor" }).ToArray() : TidyTargets);
                     TidyMeta(cat);
                     return;
                 }

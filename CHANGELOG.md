@@ -3,6 +3,23 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.6.0 - 2026-10-12
+
+### Added
+- **Simple view, the new default.** The launcher opens on one glowing green **LAUNCH** button and then walks through
+  plain-language screens: *Getting things ready* → *Your turn: put on the headset and turn on Link* (three big steps,
+  with this PC's name) → *Starting the game* → *Playing* (a big timer) → *Thanks for playing / All closed*. A three-step
+  tracker shows where it is. Timeouts, a game that is already running and failed checks become screens with big
+  buttons instead of dialogs, and a crash says what probably happened in one line with **Try again**. Mod and app
+  updates show as small badges in the header.
+- **FULL NERD** in the simple view's header switches to the dashboard, which is unchanged and keeps running
+  underneath; **SIMPLE** in the dashboard's header switches back. The launcher always starts in the simple view.
+
+### Changed
+- In the simple view the SteamVR Status window is minimized along with the other launched apps (the dashboard still
+  keeps it up for its live picture, and restores it when you switch over).
+- A question that is showing on the simple view moves to the usual dialog if you switch to full nerd.
+
 ## 1.5.2 - 2026-10-12
 
 ### Fixed
