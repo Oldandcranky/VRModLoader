@@ -1,4 +1,6 @@
 using System;
+using System.Globalization;
+using System.IO;
 using System.Text;
 using System.Web.Script.Serialization;
 
@@ -23,6 +25,33 @@ namespace VRModLoader
         public static T Deserialize<T>(string json)
         {
             return Make().Deserialize<T>(json);
+        }
+
+        /// <summary>
+        /// Writes value as indented JSON to a temp file, flushes it to disk, then swaps it in, so a crash or BSOD
+        /// mid-save never leaves a half-written file behind. Returns the JSON written.
+        /// </summary>
+        public static string SaveFile(string path, object value)
+        {
+            string json = Pretty(Serialize(value));
+            string tmp = path + ".tmp";
+            byte[] bytes = new UTF8Encoding(false).GetBytes(json);
+            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                fs.Write(bytes, 0, bytes.Length);
+                fs.Flush(true);
+            }
+            if (File.Exists(path)) File.Replace(tmp, path, null);
+            else File.Move(tmp, path);
+            return json;
+        }
+
+        /// <summary>Moves an unreadable file aside (name.unreadable-stamp) so the next save can't overwrite it. Returns the new name.</summary>
+        public static string KeepUnreadable(string path)
+        {
+            string bad = path + ".unreadable-" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
+            File.Move(path, bad);
+            return Path.GetFileName(bad);
         }
 
         /// <summary>Indents compact JSON so the settings file stays human-editable.</summary>

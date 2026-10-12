@@ -173,7 +173,7 @@ namespace VRModLoader
             save.Click += delegate { if (Apply()) { DialogResult = DialogResult.OK; Close(); } };
             var open = Theme.Link("Open settings.json");
             open.Margin = Theme.Pad(0, 4, 12, 0);
-            open.Click += delegate { try { Process.Start("notepad.exe", AppSettings.FilePath); } catch { } };
+            open.Click += delegate { try { Process.Start(ProcessUtil.SystemExe("notepad.exe"), "\"" + AppSettings.FilePath + "\""); } catch { } };
             buttons.Controls.Add(save);
             buttons.Controls.Add(cancel);
             buttons.Controls.Add(open);

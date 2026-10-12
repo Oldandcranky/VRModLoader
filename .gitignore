@@ -3,6 +3,7 @@ Logs/
 Backups/
 Sessions/
 settings.json
+settings.json.*
 
 # build output (the exe ships as a GitHub release asset, not in git)
 *.exe

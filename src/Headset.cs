@@ -70,14 +70,25 @@ namespace VRModLoader
         /// Re-plug the headset from the PC side (pnputil /restart-device, needs admin → UAC prompt). The headset sees a
         /// fresh connection and raises its "Enable Link" prompt again.
         /// </summary>
+        /// <summary>Windows\System32\pnputil.exe; a 32-bit process must ask for Sysnative or it gets redirected to SysWOW64, which has none.</summary>
+        private static string PnpUtilPath()
+        {
+            string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            string sys = Environment.Is64BitOperatingSystem && !Environment.Is64BitProcess ? "Sysnative" : "System32";
+            return System.IO.Path.Combine(win, sys, "pnputil.exe");
+        }
+
         public static bool RestartUsbDevice(string instanceId, Logger log)
         {
             const string cat = "LINK";
             if (string.IsNullOrEmpty(instanceId)) { log.Warn(cat, "No USB instance id to restart"); return false; }
+            // the id ends in the serial the device reports about itself; a quote there could add arguments to an elevated pnputil
+            if (instanceId.IndexOf('"') >= 0) { log.Warn(cat, "USB instance id contains a quote - not passing it to pnputil: " + instanceId); return false; }
             try
             {
                 log.Info(cat, "Re-plugging the headset's USB device via pnputil (Windows will ask for admin): " + instanceId);
-                var psi = new ProcessStartInfo("pnputil.exe", "/restart-device \"" + instanceId + "\"");
+                // full path: with a bare name, a pnputil.exe dropped next to the launcher would run elevated
+                var psi = new ProcessStartInfo(PnpUtilPath(), "/restart-device \"" + instanceId + "\"");
                 psi.UseShellExecute = true;
                 psi.Verb = "runas";
                 psi.WindowStyle = ProcessWindowStyle.Hidden;

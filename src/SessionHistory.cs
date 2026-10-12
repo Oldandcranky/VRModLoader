@@ -50,13 +50,20 @@ namespace VRModLoader
 
         public static List<SessionRecord> Load()
         {
+            bool unreadable;
+            return Read(out unreadable);
+        }
+
+        private static List<SessionRecord> Read(out bool unreadable)
+        {
+            unreadable = false;
             try
             {
                 if (!File.Exists(FilePath)) return new List<SessionRecord>();
                 var list = Json.Deserialize<List<SessionRecord>>(File.ReadAllText(FilePath, Encoding.UTF8));
                 return list ?? new List<SessionRecord>();
             }
-            catch { return new List<SessionRecord>(); }
+            catch { unreadable = true; return new List<SessionRecord>(); }
         }
 
         public static void Append(SessionRecord r, Logger log)
@@ -64,10 +71,13 @@ namespace VRModLoader
             try
             {
                 Directory.CreateDirectory(Program.SessionsDir);
-                var list = Load();
+                bool unreadable;
+                var list = Read(out unreadable);
+                if (unreadable)
+                    log.Warn("SESSION", "history.json could not be read - kept it as " + Json.KeepUnreadable(FilePath) + " and started a new history");
                 list.Add(r);
                 if (list.Count > 300) list = list.Skip(list.Count - 300).ToList();
-                File.WriteAllText(FilePath, Json.Pretty(Json.Serialize(list)), new UTF8Encoding(false));
+                Json.SaveFile(FilePath, list);
                 log.Debug("SESSION", "History saved (" + list.Count + " sessions) → " + FilePath);
             }
             catch (Exception ex) { log.Exception("SESSION", "Could not save session history", ex); }

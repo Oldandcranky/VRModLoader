@@ -176,6 +176,8 @@ namespace VRModLoader
             catch (Exception ex)
             {
                 log.Exception("SETTINGS", "Could not read settings.json - falling back to defaults", ex);
+                // keep the broken file for hand-repair; the next Save would otherwise overwrite it with defaults
+                try { log.Warn("SETTINGS", "Kept the unreadable file as " + Json.KeepUnreadable(path)); } catch { }
                 return new AppSettings();
             }
         }
@@ -250,8 +252,7 @@ namespace VRModLoader
         {
             try
             {
-                string json = Json.Pretty(Json.Serialize(this));
-                File.WriteAllText(FilePath, json, new UTF8Encoding(false));
+                string json = Json.SaveFile(FilePath, this);
                 if (log != null) log.Debug("SETTINGS", "Saved " + FilePath + " (" + json.Length + " bytes)");
             }
             catch (Exception ex)

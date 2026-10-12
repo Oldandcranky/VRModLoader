@@ -2038,7 +2038,7 @@ namespace VRModLoader
             {
                 if (string.IsNullOrEmpty(path)) return;
                 if (!File.Exists(path) && !Directory.Exists(path)) { _log.Warn("APP", "Path does not exist: " + path); return; }
-                Process.Start("explorer.exe", File.Exists(path) ? "/select,\"" + path + "\"" : "\"" + path + "\"");
+                Process.Start(ProcessUtil.WindowsExe("explorer.exe"), File.Exists(path) ? "/select,\"" + path + "\"" : "\"" + path + "\"");
             }
             catch (Exception ex) { _log.Exception("APP", "Could not open " + path, ex); }
         }

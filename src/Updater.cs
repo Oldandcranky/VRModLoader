@@ -125,20 +125,10 @@ namespace VRModLoader
 
                 int pid = Process.GetCurrentProcess().Id;
                 string script = Path.Combine(stageDir, "apply-update.cmd");
-                var sb = new StringBuilder();
-                sb.AppendLine("@echo off");
-                sb.AppendLine("rem VR Mod Loader self-update: wait for the old launcher to exit, swap the exe, start the new one");
-                sb.AppendLine(":wait");
-                sb.AppendLine("tasklist /FI \"PID eq " + pid + "\" 2>nul | find \"" + pid + "\" >nul");
-                sb.AppendLine("if not errorlevel 1 ( timeout /t 1 /nobreak >nul & goto wait )");
-                sb.AppendLine("copy /y \"" + staged + "\" \"" + currentExe + "\" >nul");
-                sb.AppendLine("if errorlevel 1 ( timeout /t 2 /nobreak >nul & copy /y \"" + staged + "\" \"" + currentExe + "\" >nul )");
-                sb.AppendLine("start \"\" \"" + currentExe + "\"");
-                sb.AppendLine("del \"" + staged + "\" >nul 2>&1");
-                sb.AppendLine("(goto) 2>nul & del \"%~f0\"");
-                File.WriteAllText(script, sb.ToString(), Encoding.ASCII);
+                File.WriteAllText(script, SwapScript(pid, staged, currentExe), Encoding.ASCII);
 
-                var psi = new ProcessStartInfo("cmd.exe", "/c \"" + script + "\"");
+                // full paths: bare names resolve from the launcher's folder first, so a planted cmd.exe would run instead
+                var psi = new ProcessStartInfo(ProcessUtil.SystemExe("cmd.exe"), "/c \"" + script + "\"");
                 psi.UseShellExecute = false;
                 psi.CreateNoWindow = true;
                 psi.WorkingDirectory = dir;
@@ -152,6 +142,29 @@ namespace VRModLoader
                 _log.Exception("UPDATE", "Update failed", ex);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// The swap script: wait for pid to exit, copy staged over currentExe, start it, clean up. External tools are
+        /// called by full path - the script runs with the launcher's folder as its current directory, which cmd searches first.
+        /// </summary>
+        internal static string SwapScript(int pid, string staged, string currentExe)
+        {
+            string tasklist = "\"" + ProcessUtil.SystemExe("tasklist.exe") + "\"";
+            string find = "\"" + ProcessUtil.SystemExe("find.exe") + "\"";
+            string timeout = "\"" + ProcessUtil.SystemExe("timeout.exe") + "\"";
+            var sb = new StringBuilder();
+            sb.AppendLine("@echo off");
+            sb.AppendLine("rem VR Mod Loader self-update: wait for the old launcher to exit, swap the exe, start the new one");
+            sb.AppendLine(":wait");
+            sb.AppendLine(tasklist + " /FI \"PID eq " + pid + "\" 2>nul | " + find + " \"" + pid + "\" >nul");
+            sb.AppendLine("if not errorlevel 1 ( " + timeout + " /t 1 /nobreak >nul & goto wait )");
+            sb.AppendLine("copy /y \"" + staged + "\" \"" + currentExe + "\" >nul");
+            sb.AppendLine("if errorlevel 1 ( " + timeout + " /t 2 /nobreak >nul & copy /y \"" + staged + "\" \"" + currentExe + "\" >nul )");
+            sb.AppendLine("start \"\" \"" + currentExe + "\"");
+            sb.AppendLine("del \"" + staged + "\" >nul 2>&1");
+            sb.AppendLine("(goto) 2>nul & del \"%~f0\"");
+            return sb.ToString();
         }
     }
 }

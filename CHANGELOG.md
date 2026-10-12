@@ -3,6 +3,22 @@
 All notable changes to VR Mod Loader. Version numbers come from the `VERSION` file; `build.ps1` stamps them
 into the exe (`-Bump patch|minor|major` increments it).
 
+## 1.5.2 - 2026-10-12
+
+### Fixed
+- Session history and settings can no longer be wiped by a crash mid-save. Both files were rewritten in place, so a
+  crash or BSOD during the write left a half-written file; the launcher then read it as empty and the next save
+  replaced every past session (or your settings) with defaults. Saves now go to a temp file that is flushed to disk
+  and swapped in. If a file is ever unreadable anyway, it is kept as `history.json.unreadable-<time>` /
+  `settings.json.unreadable-<time>` instead of being overwritten.
+
+### Security
+- Windows tools are started by full path (`System32\pnputil.exe`, `cmd.exe`, `tasklist.exe`, `find.exe`,
+  `timeout.exe`, `notepad.exe`, `Windows\explorer.exe`). Bare names are looked up in the launcher's own folder first,
+  so a file dropped there with one of those names would have run instead - for the USB re-plug, with admin rights.
+- The USB re-plug refuses a device id containing a quote (the end of the id is the serial number the device reports
+  about itself) rather than passing it to the elevated `pnputil`.
+
 ## 1.5.1 - 2026-10-11
 
 ### Fixed

@@ -266,6 +266,10 @@ namespace VRModLoader
             return s.IndexOf(' ') >= 0 && !s.StartsWith("\"") ? "\"" + s + "\"" : s;
         }
 
+        /// <summary>Full path of a Windows tool. Bare names resolve from the launcher's folder first, so a planted copy would run instead.</summary>
+        public static string SystemExe(string name) { return Path.Combine(Environment.SystemDirectory, name); }
+        public static string WindowsExe(string name) { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), name); }
+
         /// <summary>One-line description of an executable for the log: size, version, modified time.</summary>
         public static string Describe(string path)
         {
